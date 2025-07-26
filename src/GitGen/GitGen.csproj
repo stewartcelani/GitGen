@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>GitGen</RootNamespace>
+        <AssemblyName>gitgen</AssemblyName>
+        <PublishSingleFile>true</PublishSingleFile>
+        <SelfContained>true</SelfContained>
+        <PublishReadyToRun>true</PublishReadyToRun>
+        <PublishTrimmed>true</PublishTrimmed>
+        <TrimMode>partial</TrimMode>
+        <Version>1.0.0</Version>
+        <AssemblyVersion>1.0.0</AssemblyVersion>
+        <FileVersion>1.0.0</FileVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Core dependencies -->
+        <PackageReference Include="LibGit2Sharp" Version="0.29.0"/>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0"/>
+        <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0"/>
+        <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="9.0.0"/>
+        <PackageReference Include="Polly" Version="8.2.0"/>
+        <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1"/>
+        <PackageReference Include="System.Text.Json" Version="9.0.0"/>
+        <PackageReference Include="TextCopy" Version="6.2.1"/>
+    </ItemGroup>
+
+</Project>
