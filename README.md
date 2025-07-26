@@ -1,6 +1,11 @@
 # GitGen
 
-AI-Powered Git Commit Message Generator
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/stewartcelani/GitGen)
+![GitHub license](https://img.shields.io/github/license/stewartcelani/GitGen)
+![.NET](https://img.shields.io/badge/.NET-9.0-blueviolet)
+![GitHub last commit](https://img.shields.io/github/last-commit/stewartcelani/GitGen)
+
+### AI-Powered Git Commit Message Generator
 
 GitGen analyzes your Git repository changes and uses AI to generate meaningful, descriptive commit messages automatically. Simply run the tool in any Git repository with uncommitted changes, and it will create a commit message based on your diff and copy it to your clipboard.
 
@@ -97,6 +102,58 @@ Commands:
   prompt <prompt-text>  Generate commit message with custom prompt instruction.
   health              Display configuration info and test LLM connection.
   help                Display help information.
+```
+
+### Changing Models
+
+You can quickly change the AI model for your current provider without reconfiguring the entire setup:
+
+```bash
+gitgen model gpt-4o-mini
+```
+
+#### Example: Switching from one model to another
+
+```powershell
+PS C:\> gitgen info
+📋 Current GitGen Configuration:
+
+✅ Configuration Status: Valid
+
+🔧 Configuration Values:
+   Provider Type:     openai
+   Base URL:          https://openrouter.ai/api/v1/chat/completions
+   Model:             qwen/qwen3-coder:free
+   API Key:           sk-or-v1...*****************************************************************
+   Requires Auth:     True
+   Legacy Max Tokens: False
+   Temperature:       0.2
+
+🌍 Environment Variables:
+   GITGEN_PROVIDERTYPE: openai
+   GITGEN_BASEURL: https://openrouter.ai/api/v1/chat/completions
+   GITGEN_MODEL: qwen/qwen3-coder:free
+   GITGEN_APIKEY: sk-or-v1...*****************************************************************
+   GITGEN_REQUIRESAUTH: True
+   GITGEN_OPENAI_USE_LEGACY_MAX_TOKENS: False
+   GITGEN_TEMPERATURE: 0.2
+
+PS C:\> gitgen model qwen/qwq-32b
+🔄 Changing model from 'qwen/qwen3-coder:free' to 'qwen/qwq-32b'...
+ℹ️ Keeping provider: openai, Base URL: https://openrouter.ai/api/v1/chat/completions
+
+🧪 Testing new model configuration and detecting optimal parameters...
+✅ Parameter detection complete.
+ℹ️ Token parameter: Modern (max_completion_tokens)
+ℹ️ Temperature: 0.2
+✅ Model test successful!
+ℹ️ Detected API parameter style: Modern (max_completion_tokens)
+ℹ️ Model temperature: 0.2
+
+💾 Saving model configuration changes...
+✅ Model configuration updated successfully!
+🎯 Now using model: qwen/qwq-32b
+⚠️ You may need to restart your terminal for the changes to take effect.
 ```
 
 ### Display Configuration Information
