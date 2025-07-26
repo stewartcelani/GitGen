@@ -4,12 +4,39 @@ AI-Powered Git Commit Message Generator
 
 GitGen analyzes your Git repository changes and uses AI to generate meaningful, descriptive commit messages automatically. Simply run the tool in any Git repository with uncommitted changes, and it will create a commit message based on your diff and copy it to your clipboard.
 
+## Features
+
+- 🔍 Automatic Git diff analysis
+- 🤖 Supports any OpenAI-compatible API (OpenAI, Anthropic, Google, Azure, Groq, local models, and more)
+- 📋 Commit messages automatically copy to clipboard
+- 🔧 Interactive configuration wizard
+- 🎨 Custom commit styles with `-p` flag
+- 🔄 Self-healing API parameter detection
+- 🌍 Cross-platform (Windows, macOS, Linux)
+- 📦 No external runtime dependencies
+- 🐛 Debug logging and connection testing
+
+## Quick Start
+
+```bash
+# Configure your AI provider
+gitgen configure
+
+# Generate commit message for staged changes
+gitgen
+
+# Guide commit messages
+gitgen -p "Must be a haiku"
+gitgen -p "Focus just on changes to app.py and ignore other files"
+```
+
 ## Installation
 
 1. Download the appropriate release for your platform from the [Releases page](https://github.com/stewartcelani/GitGen/releases).
 2. Extract the archive.
 3. Add the executable to your PATH.
 4. Run `gitgen configure` to set up your AI provider.
+
 
 ### Build from Source
 
@@ -419,36 +446,33 @@ Found 5 changed files
 
 Using OpenAI provider (http://localhost:1234/v1/chat/completions, qwen2.5-3b-instruct) to generate commit message
 ✅ Generated Commit Message:
-"CRITICAL: Added comprehensive commit message generation with OpenAI provider, simplified `Program.cs` methods, and updated configuration wizard for user-friendly model changes. Consolidated codebase improvements maintain security, extensibility, and ease of use."
+"Added comprehensive commit message generation with OpenAI provider, simplified `Program.cs` methods, and updated configuration wizard for user-friendly model changes. Consolidated codebase improvements maintain security, extensibility, and ease of use."
 
 Generated with 6,193 input tokens, 47 output tokens (6,240 total) • 262 characters
 
 📋 Commit message copied to clipboard.
 ```
 
+## Support & Feedback
+
+- 🐛 **Bug reports & feature requests**: [Submit an issue](https://github.com/stewartcelani/GitGen/issues)
+- 💡 **Questions & discussions**: Check existing issues or start a new one
+
 ## Project Structure
 
 ```
 src/
-├── GitGen/                 # Main application
-│   ├── Configuration/      # Configuration management
-│   ├── Providers/          # AI provider implementations (OpenAI)
-│   ├── Services/           # Core business logic
-│   └── Program.cs          # Application entry point
-└── GitGen.Tests/           # Unit and integration tests (not included)
+└── GitGen/                 # Main application
+    ├── Configuration/      # Configuration management
+    ├── Constants.cs        # Application constants
+    ├── Exceptions/         # Custom exception types
+    ├── Helpers/            # Utility classes
+    ├── Providers/          # AI provider implementations
+    │   └── OpenAI/         # OpenAI-compatible provider
+    ├── Services/           # Core business logic
+    ├── Program.cs          # Application entry point
+    └── GitGen.csproj       # Project file
 ```
-
-## Features
-
-- ✅ Automatic Git diff analysis
-- ✅ AI-powered commit message generation
-- ✅ Clipboard integration
-- ✅ Interactive configuration wizard for easy setup
-- ✅ Supports OpenAI, Anthropic, Google, Azure, Groq, and local models (LM Studio, Ollama)
-- ✅ Custom instruction support (`-p` flag)
-- ✅ Debug logging and connection testing
-- ✅ No external runtime dependencies
-- ✅ Works on Windows, Mac and Linux
 
 ## Building & Publishing (For Developers)
 
