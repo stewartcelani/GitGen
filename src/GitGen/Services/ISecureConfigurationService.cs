@@ -57,12 +57,6 @@ public interface ISecureConfigurationService
     Task SetDefaultModelAsync(string nameOrId);
 
     /// <summary>
-    ///     Migrates configuration from environment variables to secure storage.
-    /// </summary>
-    /// <returns>True if migration was performed; otherwise, false.</returns>
-    Task<bool> MigrateFromEnvironmentVariablesAsync();
-
-    /// <summary>
     ///     Adds an alias to a model configuration.
     /// </summary>
     /// <param name="modelNameOrId">The name or ID of the model to add the alias to.</param>
@@ -75,4 +69,18 @@ public interface ISecureConfigurationService
     /// <param name="modelNameOrId">The name or ID of the model to remove the alias from.</param>
     /// <param name="alias">The alias to remove.</param>
     Task RemoveAliasAsync(string modelNameOrId, string alias);
+
+    /// <summary>
+    ///     Gets models that match a partial name or alias.
+    /// </summary>
+    /// <param name="partial">The partial name or alias to match.</param>
+    /// <returns>A list of models that match the partial string.</returns>
+    Task<List<ModelConfiguration>> GetModelsByPartialMatchAsync(string partial);
+
+    /// <summary>
+    ///     Heals broken default model configuration by prompting user to select a new default.
+    /// </summary>
+    /// <param name="logger">The console logger for user interaction.</param>
+    /// <returns>True if healing was successful; otherwise, false.</returns>
+    Task<bool> HealDefaultModelAsync(IConsoleLogger logger);
 }

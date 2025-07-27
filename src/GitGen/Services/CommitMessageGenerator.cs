@@ -42,8 +42,19 @@ public class CommitMessageGenerator
         try
         {
             var provider = _providerFactory.CreateProvider(config, modelConfig);
-            _logger.Information("Using {ProviderName} provider ({BaseUrl}, {Model}) to generate commit message",
-                provider.ProviderName, config.BaseUrl ?? "unknown", config.Model ?? "unknown");
+            
+            // Display model information in a cleaner format
+            if (modelConfig != null)
+            {
+                _logger.Information("🔗 Using {ModelName} ({ModelId} via {Provider} @ {Url})",
+                    modelConfig.Name, modelConfig.ModelId, modelConfig.Provider, modelConfig.Url);
+            }
+            else
+            {
+                // Fallback for when modelConfig is not available
+                _logger.Information("🔗 Using {Model} via {ProviderName} @ {BaseUrl}",
+                    config.Model ?? "unknown", provider.ProviderName, config.BaseUrl ?? "unknown");
+            }
 
             if (!string.IsNullOrWhiteSpace(customInstruction))
                 _logger.Information("Applying custom instruction: {Instruction}", customInstruction);
@@ -79,8 +90,8 @@ public class CommitMessageGenerator
         }
         catch (Exception ex)
         {
-            _logger.Error(ex, "Failed to generate commit message using {ProviderType}",
-                config.ProviderType ?? "unknown");
+            _logger.Error(ex, "Failed to generate commit message using {Type}",
+                config.Type ?? "unknown");
             throw;
         }
     }

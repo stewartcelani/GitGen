@@ -100,14 +100,42 @@ public static class CostCalculationService
         {
             // Currencies that typically show symbol after amount
             "SEK" or "NOK" or "DKK" or "CZK" or "PLN" or "HUF" or "RON" or "BGN" or "HRK" 
-                => $"{amount:F4} {symbol}",
+                => $"{amount:F2} {symbol}",
             
             // Currencies with no decimal places
             "JPY" or "KRW" or "VND" or "IDR" or "CLP" or "COP" or "HUF" 
                 => $"{symbol}{amount:F0}",
             
-            // Default: symbol before amount with 4 decimal places
-            _ => $"{symbol}{amount:F4}"
+            // Default: symbol before amount with 2 decimal places
+            _ => $"{symbol}{amount:F2}"
+        };
+    }
+    
+    /// <summary>
+    ///     Formats a currency amount with the appropriate symbol and specified decimal places.
+    /// </summary>
+    /// <param name="amount">The amount to format.</param>
+    /// <param name="currencyCode">The ISO currency code.</param>
+    /// <param name="decimalPlaces">The number of decimal places to display.</param>
+    /// <returns>A formatted currency string.</returns>
+    public static string FormatCurrency(decimal amount, string currencyCode, int decimalPlaces)
+    {
+        var symbol = GetCurrencySymbol(currencyCode);
+        var format = $"F{decimalPlaces}";
+        
+        // Special formatting for certain currencies
+        return currencyCode switch
+        {
+            // Currencies that typically show symbol after amount
+            "SEK" or "NOK" or "DKK" or "CZK" or "PLN" or "HUF" or "RON" or "BGN" or "HRK" 
+                => $"{amount.ToString(format)} {symbol}",
+            
+            // Currencies with no decimal places (override decimalPlaces)
+            "JPY" or "KRW" or "VND" or "IDR" or "CLP" or "COP" or "HUF" 
+                => $"{symbol}{amount:F0}",
+            
+            // Default: symbol before amount with specified decimal places
+            _ => $"{symbol}{amount.ToString(format)}"
         };
     }
 
@@ -122,16 +150,47 @@ public static class CostCalculationService
     }
 
     /// <summary>
+    ///     Gets the number of decimal places in a decimal value.
+    /// </summary>
+    /// <param name="value">The decimal value to analyze.</param>
+    /// <returns>The number of decimal places, capped at 4.</returns>
+    private static int GetDecimalPlaces(decimal value)
+    {
+        // Convert to string and find decimal places
+        var str = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var decimalIndex = str.IndexOf('.');
+        if (decimalIndex < 0)
+            return 0;
+            
+        var decimalPlaces = str.Length - decimalIndex - 1;
+        
+        // Remove trailing zeros to get actual significant decimal places
+        str = str.TrimEnd('0');
+        decimalPlaces = str.Length - decimalIndex - 1;
+        
+        // Cap at 4 decimal places max, default to 2 if less than 2
+        return Math.Max(2, Math.Min(decimalPlaces, 4));
+    }
+    
+    /// <summary>
     ///     Formats the pricing information for display.
     /// </summary>
     /// <param name="pricing">The pricing information to format.</param>
     /// <returns>A formatted string showing input/output costs per million tokens.</returns>
     public static string FormatPricingInfo(PricingInfo pricing)
     {
-        var inputFormatted = FormatCurrency(pricing.InputPer1M, pricing.CurrencyCode);
-        var outputFormatted = FormatCurrency(pricing.OutputPer1M, pricing.CurrencyCode);
+        // If both costs are 0, display "Free"
+        if (pricing.InputPer1M == 0 && pricing.OutputPer1M == 0)
+            return "Free";
         
-        return $"{inputFormatted}/{outputFormatted} per 1M tokens";
+        // Detect decimal places from the actual values (minimum 2, maximum 4)
+        var inputDecimals = GetDecimalPlaces(pricing.InputPer1M);
+        var outputDecimals = GetDecimalPlaces(pricing.OutputPer1M);
+        
+        var inputFormatted = FormatCurrency(pricing.InputPer1M, pricing.CurrencyCode, inputDecimals);
+        var outputFormatted = FormatCurrency(pricing.OutputPer1M, pricing.CurrencyCode, outputDecimals);
+        
+        return $"Input: {inputFormatted}/M, Output: {outputFormatted}/M";
     }
 
     /// <summary>

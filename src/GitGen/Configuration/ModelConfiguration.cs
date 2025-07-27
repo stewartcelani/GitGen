@@ -16,9 +16,15 @@ public class ModelConfiguration
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    ///     Gets or sets the provider type (e.g., "openai", "anthropic", "local").
+    ///     Gets or sets the API compatibility type (e.g., "openai-compatible").
     /// </summary>
-    public string ProviderType { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>
+    ///     Gets or sets the provider name (e.g., "openrouter.ai", "OpenAI", "Anthropic").
+    ///     This can be the domain extracted from the URL or a custom name set by the user.
+    /// </summary>
+    public string Provider { get; set; } = string.Empty;
 
     /// <summary>
     ///     Gets or sets the base URL for the API endpoint.
@@ -64,11 +70,6 @@ public class ModelConfiguration
     ///     Gets or sets when this model was last used.
     /// </summary>
     public DateTime LastUsed { get; set; } = DateTime.UtcNow;
-
-    /// <summary>
-    ///     Gets or sets whether this is the default model.
-    /// </summary>
-    public bool IsDefault { get; set; }
 
     /// <summary>
     ///     Gets or sets an optional note or description for this model.

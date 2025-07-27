@@ -18,7 +18,6 @@ public class OpenAIProvider : ICommitMessageProvider
     private readonly HttpClientService _httpClient;
     private readonly IConsoleLogger _logger;
     private readonly OpenAIParameterDetector _parameterDetector;
-    private readonly IEnvironmentPersistenceService? _persistenceService;
     private readonly ILlmCallTracker? _callTracker;
     private ModelConfiguration? _modelConfig;
 
@@ -28,19 +27,16 @@ public class OpenAIProvider : ICommitMessageProvider
     /// <param name="httpClient">The service for making HTTP requests to the API.</param>
     /// <param name="logger">The console logger for debugging and error reporting.</param>
     /// <param name="config">The GitGen configuration containing API settings.</param>
-    /// <param name="persistenceService">Optional service for persisting configuration changes during self-healing.</param>
     public OpenAIProvider(
         HttpClientService httpClient,
         IConsoleLogger logger,
         GitGenConfiguration config,
-        IEnvironmentPersistenceService? persistenceService = null,
         ILlmCallTracker? callTracker = null,
         ModelConfiguration? modelConfig = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _config = config;
-        _persistenceService = persistenceService;
         _callTracker = callTracker;
         _modelConfig = modelConfig;
         _parameterDetector = new OpenAIParameterDetector(
@@ -249,9 +245,37 @@ public class OpenAIProvider : ICommitMessageProvider
             var parameters = await _parameterDetector.DetectParametersAsync(_config.Model!);
             return (true, parameters.UseLegacyMaxTokens, parameters.Temperature);
         }
+        catch (HttpResponseException)
+        {
+            // The HttpResponseException already has formatted error information
+            // No need to log here as HttpClientService already logged with proper formatting
+            return (false, false, Constants.Configuration.DefaultTemperature);
+        }
+        catch (HttpRequestException httpEx)
+        {
+            // Handle legacy HttpRequestException (in case parameter detector hasn't been updated yet)
+            if (httpEx.InnerException is HttpResponseException responseEx)
+            {
+                // Already logged by HttpClientService
+                return (false, false, Constants.Configuration.DefaultTemperature);
+            }
+            
+            // Fallback for other HTTP errors
+            var errorMessage = httpEx.Message;
+            if (httpEx.StatusCode != null)
+            {
+                _logger.Error($"API request failed with status code {httpEx.StatusCode}: {errorMessage}");
+            }
+            else
+            {
+                _logger.Error($"API request failed: {errorMessage}");
+            }
+            
+            return (false, false, Constants.Configuration.DefaultTemperature);
+        }
         catch (Exception ex)
         {
-            _logger.Error(ex, Constants.ErrorMessages.ParameterDetectionFailed);
+            _logger.Error(ex, "Configuration test failed");
             return (false, false, Constants.Configuration.DefaultTemperature);
         }
     }
@@ -289,14 +313,7 @@ public class OpenAIProvider : ICommitMessageProvider
 
             _logger.Information("Successfully re-detected correct API parameters. Updating configuration...");
 
-            // Update persistent configuration if service is available
-            if (_persistenceService != null)
-                _persistenceService.UpdateModelConfiguration(
-                    _config.Model!,
-                    parameters.UseLegacyMaxTokens,
-                    parameters.Temperature);
-
-            // Update in-memory configuration
+            // Update in-memory configuration only (no persistence)
             _config.OpenAiUseLegacyMaxTokens = parameters.UseLegacyMaxTokens;
             _config.Temperature = parameters.Temperature;
 
@@ -326,14 +343,7 @@ public class OpenAIProvider : ICommitMessageProvider
 
             _logger.Information("Successfully re-detected correct temperature. Updating configuration...");
 
-            // Update persistent configuration if service is available
-            if (_persistenceService != null)
-                _persistenceService.UpdateModelConfiguration(
-                    _config.Model!,
-                    parameters.UseLegacyMaxTokens,
-                    parameters.Temperature);
-
-            // Update in-memory configuration and request
+            // Update in-memory configuration only (no persistence) and request
             _config.Temperature = parameters.Temperature;
             request.Temperature = parameters.Temperature;
 
@@ -372,27 +382,24 @@ public class OpenAIProvider : ICommitMessageProvider
                     new AuthenticationHeaderValue(Constants.Api.BearerPrefix, _config.ApiKey);
         }
 
-        var response = await _httpClient.SendAsync(httpRequest);
-
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var error = await response.Content.ReadAsStringAsync();
-            _logger.Error("API error: {StatusCode} - {Error}", response.StatusCode, error);
-            _logger.Debug("Full error response for debugging: {FullError}", error);
-
-            var httpException = new HttpRequestException(
-                string.Format(Constants.ErrorMessages.ApiRequestFailed, response.StatusCode, error),
-                null,
-                response.StatusCode);
-
-            // Check if this is an authentication error and throw specific exception
-            if (IsAuthenticationError(httpException, error))
-                throw new AuthenticationException(Constants.ErrorMessages.AuthenticationFailed, httpException);
-
-            throw httpException;
+            // Use the new HttpClientService with verbose error handling options
+            var response = await _httpClient.SendAsync(httpRequest, GitGen.Services.HttpRequestOptions.Verbose);
+            return response;
         }
+        catch (HttpResponseException ex)
+        {
+            // Check if this is an authentication error and throw specific exception
+            if (ex.IsAuthenticationError || IsAuthenticationError(null, ex.ResponseBody ?? ""))
+                throw new AuthenticationException(Constants.ErrorMessages.AuthenticationFailed, ex);
 
-        return response;
+            // Re-throw as HttpRequestException for compatibility
+            throw new HttpRequestException(
+                string.Format(Constants.ErrorMessages.ApiRequestFailed, ex.StatusCode, ex.Message),
+                ex,
+                ex.StatusCode);
+        }
     }
 
     private string BuildSystemPrompt(string? customInstruction)

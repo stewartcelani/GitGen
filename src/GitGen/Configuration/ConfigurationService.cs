@@ -3,8 +3,7 @@ using GitGen.Services;
 namespace GitGen.Configuration;
 
 /// <summary>
-///     Service for loading and validating GitGen configuration.
-///     Provides backward compatibility while using the new secure multi-model configuration system.
+///     Service for loading and validating GitGen configuration from secure storage.
 /// </summary>
 public class ConfigurationService
 {
@@ -23,23 +22,20 @@ public class ConfigurationService
     }
 
     /// <summary>
-    ///     Loads GitGen configuration, attempting secure storage first, then falling back to environment variables.
+    ///     Loads GitGen configuration from secure storage.
     /// </summary>
-    /// <returns>A GitGenConfiguration object populated from the active model or environment variables.</returns>
+    /// <returns>A GitGenConfiguration object populated from the active model.</returns>
     public GitGenConfiguration LoadConfiguration()
     {
-        // If we have secure config service, try to load from it first
-        if (_secureConfig != null)
+        if (_secureConfig == null)
         {
-            var task = LoadConfigurationAsync();
-            task.Wait();
-            var config = task.Result;
-            if (config != null && config.IsValid)
-                return config;
+            _logger.Error("Secure configuration service not available");
+            return new GitGenConfiguration();
         }
 
-        // Fall back to environment variables for backward compatibility
-        return LoadFromEnvironmentVariables();
+        var task = LoadConfigurationAsync();
+        task.Wait();
+        return task.Result ?? new GitGenConfiguration();
     }
 
     /// <summary>
@@ -50,7 +46,20 @@ public class ConfigurationService
     public async Task<GitGenConfiguration?> LoadConfigurationAsync(string? modelName = null)
     {
         if (_secureConfig == null)
-            return LoadFromEnvironmentVariables();
+        {
+            _logger.Error("Secure configuration service not available");
+            return null;
+        }
+
+        // Check if we have ANY models in secure storage
+        var hasModels = await HasModelsAsync();
+        if (!hasModels)
+        {
+            _logger.Debug("No models configured in secure storage");
+            return null;
+        }
+        
+        _logger.Debug("Found models in secure storage");
 
         ModelConfiguration? model;
 
@@ -68,8 +77,9 @@ public class ConfigurationService
             model = await _secureConfig.GetDefaultModelAsync();
             if (model == null)
             {
-                _logger.Debug("No models configured in secure storage");
-                return LoadFromEnvironmentVariables();
+                // We have models but no default - this needs healing
+                _logger.Debug("Models exist but no default model is set");
+                return null;
             }
         }
 
@@ -100,7 +110,8 @@ public class ConfigurationService
     {
         return new GitGenConfiguration
         {
-            ProviderType = model.ProviderType,
+            Type = model.Type,
+            Provider = model.Provider,
             BaseUrl = model.Url,  // Map Url back to BaseUrl for compatibility
             Model = model.ModelId,
             ApiKey = model.ApiKey,
@@ -113,142 +124,51 @@ public class ConfigurationService
     }
 
     /// <summary>
-    ///     Loads GitGen configuration from environment variables.
+    ///     Checks if any models are configured in secure storage.
     /// </summary>
-    /// <returns>A GitGenConfiguration object populated from environment variables.</returns>
-    private GitGenConfiguration LoadFromEnvironmentVariables()
+    /// <returns>True if at least one model exists; otherwise, false.</returns>
+    public async Task<bool> HasModelsAsync()
     {
-        _logger.Debug("Loading configuration from environment variables.");
+        if (_secureConfig == null)
+            return false;
 
-        var config = new GitGenConfiguration
-        {
-            ProviderType = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.ProviderType),
-            BaseUrl = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.BaseUrl),
-            Model = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.Model),
-            ApiKey = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.ApiKey),
-            RequiresAuth = ParseBooleanWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.RequiresAuth),
-                true),
-            OpenAiUseLegacyMaxTokens = ParseBooleanWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.UseLegacyMaxTokens),
-                false),
-            Temperature = ParseTemperatureWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.Temperature)),
-            MaxOutputTokens = ParseTokenCountWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.MaxOutputTokens))
-        };
-
-        // Validate and report issues
-        ValidateConfiguration(config);
-
-        return config;
+        var settings = await _secureConfig.LoadSettingsAsync();
+        return settings.Models.Count > 0;
     }
 
     /// <summary>
-    ///     Validates the loaded configuration and logs specific issues found.
+    ///     Checks if the default model configuration needs healing.
     /// </summary>
-    /// <param name="config">The configuration to validate</param>
-    private void ValidateConfiguration(GitGenConfiguration config)
+    /// <returns>True if healing is needed; otherwise, false.</returns>
+    public async Task<bool> NeedsDefaultModelHealingAsync()
     {
-        if (config.IsValid)
+        if (_secureConfig == null)
+            return false;
+
+        var settings = await _secureConfig.LoadSettingsAsync();
+        
+        // No models exist, so no healing possible
+        if (settings.Models.Count == 0)
         {
-            _logger.Debug("Configuration validation successful");
-            return;
+            _logger.Debug("No models exist, healing not possible");
+            return false;
         }
-
-        _logger.Warning("Configuration validation failed:");
-
-        // Validate each component and provide specific feedback
-        if (!ValidationService.Provider.IsValid(config.ProviderType))
-            _logger.Warning("- {Error}", ValidationService.Provider.GetValidationError(config.ProviderType));
-
-        if (!ValidationService.Url.IsValid(config.BaseUrl))
-            _logger.Warning("- {Error}", ValidationService.Url.GetValidationError(config.BaseUrl));
-
-        if (!ValidationService.Model.IsValid(config.Model))
-            _logger.Warning("- {Error}", ValidationService.Model.GetValidationError(config.Model));
-
-        if (!ValidationService.ApiKey.IsValid(config.ApiKey, config.RequiresAuth))
-            _logger.Warning("- {Error}",
-                ValidationService.ApiKey.GetValidationError(config.ApiKey, config.RequiresAuth));
-
-        if (!ValidationService.Temperature.IsValid(config.Temperature))
-            _logger.Warning("- {Error}", ValidationService.Temperature.GetValidationError(config.Temperature));
-
-        if (!ValidationService.TokenCount.IsValid(config.MaxOutputTokens))
-            _logger.Warning("- {Error}", ValidationService.TokenCount.GetValidationError(config.MaxOutputTokens));
-    }
-
-    /// <summary>
-    ///     Parses a boolean value with a specified default.
-    /// </summary>
-    /// <param name="value">The string value to parse</param>
-    /// <param name="defaultValue">The default value if parsing fails</param>
-    /// <returns>Parsed boolean or default value</returns>
-    private bool ParseBooleanWithDefault(string? value, bool defaultValue)
-    {
-        if (string.IsNullOrEmpty(value))
-            return defaultValue;
-
-        return bool.TryParse(value, out var result) ? result : defaultValue;
-    }
-
-    /// <summary>
-    ///     Parses a temperature value with validation and default fallback.
-    /// </summary>
-    /// <param name="value">The string value to parse</param>
-    /// <returns>Valid temperature value</returns>
-    private double ParseTemperatureWithDefault(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return Constants.Configuration.DefaultTemperature;
-
-        if (!double.TryParse(value, out var temperature))
+        
+        // Check if default model is missing or invalid
+        if (string.IsNullOrEmpty(settings.DefaultModelId))
         {
-            _logger.Debug("Invalid temperature value '{Value}', using default {Default}",
-                value, Constants.Configuration.DefaultTemperature);
-            return Constants.Configuration.DefaultTemperature;
+            _logger.Debug("Default model ID is missing, healing needed");
+            return true;
         }
-
-        if (!ValidationService.Temperature.IsValid(temperature))
+        
+        // Check if default model ID points to non-existent model
+        if (!settings.Models.Any(m => m.Id == settings.DefaultModelId))
         {
-            var clampedTemperature = ValidationService.Temperature.Clamp(temperature);
-            _logger.Warning("Temperature value {Value} is out of range. Clamped to {ClampedValue}.",
-                temperature, clampedTemperature);
-            return clampedTemperature;
+            _logger.Debug("Default model ID '{DefaultId}' points to non-existent model, healing needed", settings.DefaultModelId);
+            return true;
         }
-
-        return temperature;
-    }
-
-    /// <summary>
-    ///     Parses a token count value with validation and default fallback.
-    /// </summary>
-    /// <param name="value">The string value to parse</param>
-    /// <returns>Valid token count value</returns>
-    private int ParseTokenCountWithDefault(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return Constants.Configuration.DefaultMaxOutputTokens;
-
-        if (!int.TryParse(value, out var tokens))
-        {
-            _logger.Debug("Invalid token count value '{Value}', using default {Default}",
-                value, Constants.Configuration.DefaultMaxOutputTokens);
-            return Constants.Configuration.DefaultMaxOutputTokens;
-        }
-
-        if (!ValidationService.TokenCount.IsValid(tokens))
-        {
-            var clampedTokens = ValidationService.TokenCount.Clamp(tokens);
-            _logger.Warning(Constants.ErrorMessages.TokensOutOfRange,
-                tokens,
-                Constants.Configuration.MinOutputTokens,
-                Constants.Configuration.MaxOutputTokens,
-                clampedTokens);
-            return clampedTokens;
-        }
-
-        return tokens;
+        
+        _logger.Debug("Default model configuration is valid");
+        return false;
     }
 }

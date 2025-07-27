@@ -1,11 +1,13 @@
 using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
+using System.CommandLine.Invocation;
 using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using GitGen.Configuration;
 using GitGen.Exceptions;
+using GitGen.Helpers;
 using GitGen.Providers;
 using GitGen.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,23 +29,57 @@ internal class Program
     private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
+        
+        // Pre-parse arguments to handle @model syntax
+        string? modelNameFromAlias = null;
+        var processedArgs = new List<string>(args.Length);
+
+        foreach (var arg in args)
+        {
+            // An alias is only detected if the entire argument begins with '@'.
+            // This correctly ignores '@' symbols inside a quoted prompt.
+            if (arg.StartsWith("@") && arg.Length > 1)
+            {
+                // Capture the model name (e.g., "fast" from "@fast").
+                // If multiple @aliases are used, the last one wins.
+                modelNameFromAlias = arg.Substring(1);
+            }
+            else
+            {
+                // This is part of the prompt.
+                processedArgs.Add(arg);
+            }
+        }
+
+        // If an @-alias was found, inject it back into the argument list
+        // as a standard, hidden option that System.CommandLine can parse safely.
+        if (!string.IsNullOrEmpty(modelNameFromAlias))
+        {
+            processedArgs.Insert(0, modelNameFromAlias);
+            processedArgs.Insert(0, "--model");
+        }
+        
         var serviceProvider = ConfigureServices();
         var rootCommand = BuildCommandLine(serviceProvider);
 
-        // Use CommandLineBuilder to disable automatic version handling
+        // Use CommandLineBuilder for command processing
         var parser = new CommandLineBuilder(rootCommand)
             .UseHelp()
-            .UseEnvironmentVariableDirective()
             .UseParseDirective()
             .UseSuggestDirective()
             .RegisterWithDotnetSuggest()
             .UseTypoCorrections()
             .UseParseErrorReporting()
-            .UseExceptionHandler()
+            .UseExceptionHandler((exception, context) =>
+            {
+                // Handle all exceptions with a user-friendly error message
+                Console.Error.WriteLine($"Error: {exception.Message}");
+                context.ExitCode = 1;
+            })
             .CancelOnProcessTermination()
-            .Build(); // Notice: no .UseVersionOption()
+            .Build();
 
-        return await parser.InvokeAsync(args);
+        return await parser.InvokeAsync(processedArgs.ToArray());
     }
 
     private static ServiceProvider ConfigureServices()
@@ -60,8 +96,6 @@ internal class Program
                     provider.GetRequiredService<ISecureConfigurationService>()))
             .AddSingleton<ILlmCallTracker>(provider =>
                 new LlmCallTracker(factory.CreateLogger<LlmCallTracker>()))
-            .AddSingleton<IEnvironmentPersistenceService>(provider =>
-                new EnvironmentPersistenceService(factory.CreateLogger<EnvironmentPersistenceService>()))
             .AddSingleton<HttpClientService>(provider =>
                 new HttpClientService(factory.CreateLogger<HttpClientService>()))
             .AddSingleton<ProviderFactory>(provider =>
@@ -76,29 +110,38 @@ internal class Program
                 new ConfigurationWizardService(
                     factory.CreateLogger<ConfigurationWizardService>(),
                     provider.GetRequiredService<ProviderFactory>(),
-                    provider.GetRequiredService<IEnvironmentPersistenceService>(),
                     provider.GetRequiredService<ConfigurationService>(),
                     provider.GetRequiredService<ISecureConfigurationService>()))
+            .AddSingleton<ConfigurationMenuService>(provider =>
+                new ConfigurationMenuService(
+                    factory.CreateLogger<ConfigurationMenuService>(),
+                    provider.GetRequiredService<ISecureConfigurationService>(),
+                    provider.GetRequiredService<ConfigurationWizardService>(),
+                    provider.GetRequiredService<ConfigurationService>(),
+                    provider.GetRequiredService<ProviderFactory>()))
             .BuildServiceProvider();
     }
 
     private static RootCommand BuildCommandLine(IServiceProvider serviceProvider)
     {
         // Define root command and its options - testing
-        var customInstructionOption =
-            new Option<string?>("-p", "Custom prompt to focus guide/focus LLM when generating commit message.");
-        customInstructionOption.AddAlias("--prompt");
         var debugOption = new Option<bool>("-d", "Enable debug logging.");
         debugOption.AddAlias("--debug");
         var versionShortOption = new Option<bool>("-v", "Show version information");
         var versionLongOption = new Option<bool>("--version", "Show version information");
         var rootCommand = new RootCommand("GitGen - AI-Powered Git Commit Message Generator")
         {
-            customInstructionOption,
             debugOption,
             versionShortOption,
             versionLongOption
         };
+
+        // Add hidden option to carry the model name from @alias syntax
+        var modelOption = new Option<string>("--model", "The AI model alias to use for generation")
+        {
+            IsHidden = true
+        };
+        rootCommand.AddOption(modelOption);
 
         // Add catch-all argument to support @ syntax
         var inputArgument = new Argument<string[]>("input", "Input text with optional @model syntax")
@@ -110,19 +153,14 @@ internal class Program
         rootCommand.SetHandler(async invocationContext =>
         {
             var debug = invocationContext.ParseResult.GetValueForOption(debugOption);
-            var customInstruction = invocationContext.ParseResult.GetValueForOption(customInstructionOption);
             var showVersionShort = invocationContext.ParseResult.GetValueForOption(versionShortOption);
             var showVersionLong = invocationContext.ParseResult.GetValueForOption(versionLongOption);
-            var inputArgs = invocationContext.ParseResult.GetValueForArgument(inputArgument) ?? Array.Empty<string>();
-
-            // Parse input arguments for @ syntax
-            var (modelName, parsedPrompt) = ParseInputForModelAndPrompt(inputArgs);
             
-            // If prompt was parsed from input, use it (unless -p option overrides)
-            if (!string.IsNullOrEmpty(parsedPrompt) && string.IsNullOrEmpty(customInstruction))
-            {
-                customInstruction = parsedPrompt;
-            }
+            // Read the model name from our hidden option and the prompt from the argument
+            var modelName = invocationContext.ParseResult.GetValueForOption(modelOption);
+            var promptParts = invocationContext.ParseResult.GetValueForArgument(inputArgument);
+            var customInstruction = promptParts != null && promptParts.Any() 
+                ? string.Join(" ", promptParts) : null;
 
             if (showVersionShort || showVersionLong)
             {
@@ -136,41 +174,72 @@ internal class Program
 
             var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
             var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-
-            // Check for migration on first run
-            var migrated = await secureConfig.MigrateFromEnvironmentVariablesAsync();
-            if (migrated)
-            {
-                logger.Information("");
-                logger.Warning($"{Constants.UI.WarningSymbol} Your environment variable configuration has been migrated to secure storage.");
-                logger.Information("You can now remove GitGen environment variables if desired.");
-                Console.WriteLine();
-            }
-
             var configService = serviceProvider.GetRequiredService<ConfigurationService>();
             var config = await configService.LoadConfigurationAsync(modelName);
 
+            // If a specific model was requested but not found, show available models
+            if (config == null && !string.IsNullOrEmpty(modelName))
+            {
+                await DisplayModelSuggestions(serviceProvider, logger, modelName);
+                invocationContext.ExitCode = 1;
+                return;
+            }
+
             if (config == null || !config.IsValid)
             {
-                logger.Error($"{Constants.UI.CrossMark} {Constants.Messages.ConfigurationMissing}");
-                logger.Information($"{Constants.UI.InfoSymbol} Starting configuration wizard...");
-                Console.WriteLine();
-
-                var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-                var wizardConfig = await wizard.RunWizardAsync();
-
-                if (wizardConfig == null)
+                // Check if we have models but just need to fix the default
+                if (secureConfig != null && await configService.NeedsDefaultModelHealingAsync())
                 {
-                    logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationSetupFailed}");
-                    invocationContext.ExitCode = 1;
-                    return;
+                    logger.Debug("Default model configuration needs healing");
+                    
+                    // Attempt to heal the default model configuration
+                    var healed = await secureConfig.HealDefaultModelAsync(logger);
+                    if (healed)
+                    {
+                        // Try loading configuration again after healing
+                        config = await configService.LoadConfigurationAsync(modelName);
+                        if (config != null && config.IsValid)
+                        {
+                            Console.WriteLine();
+                            // Successfully healed, continue with generation
+                        }
+                        else
+                        {
+                            logger.Error($"{Constants.UI.CrossMark} Failed to load configuration after healing");
+                            invocationContext.ExitCode = 1;
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        logger.Error($"{Constants.UI.CrossMark} Failed to heal default model configuration");
+                        invocationContext.ExitCode = 1;
+                        return;
+                    }
                 }
+                else
+                {
+                    // No models exist or no secure config, run the wizard
+                    logger.Error($"{Constants.UI.CrossMark} {Constants.Messages.ConfigurationMissing}");
+                    logger.Information($"{Constants.UI.GearSymbol} Starting configuration wizard...");
+                    Console.WriteLine();
 
-                // Use the configuration returned from the wizard directly
-                config = wizardConfig;
+                    var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
+                    var wizardConfig = await wizard.RunWizardAsync();
 
-                logger.Success($"{Constants.UI.CheckMark} {Constants.Messages.ConfigurationSaved}");
-                Console.WriteLine();
+                    if (wizardConfig == null)
+                    {
+                        logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationSetupFailed}");
+                        invocationContext.ExitCode = 1;
+                        return;
+                    }
+
+                    // Use the configuration returned from the wizard directly
+                    config = wizardConfig;
+
+                    logger.Success($"{Constants.UI.CheckMark} {Constants.Messages.ConfigurationSaved}");
+                    Console.WriteLine();
+                }
             }
 
             // Get the active model for cost calculation
@@ -180,418 +249,17 @@ internal class Program
             await GenerateCommitMessage(serviceProvider, logger, config, customInstruction, activeModel);
         });
 
-        // Define 'configure' command
-        var configureCommand = new Command("configure", "Run the interactive configuration wizard.");
+        // Define 'config' command
+        var configCommand = new Command("config", "Run the interactive configuration menu.");
 
-        configureCommand.SetHandler(async invocationContext =>
+        configCommand.SetHandler(async invocationContext =>
         {
             ConsoleLogger.SetDebugMode(false);
-            var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-            var wizardConfig = await wizard.RunWizardAsync();
-            invocationContext.ExitCode = wizardConfig != null ? 0 : 1;
-        });
-
-        // Define 'test' command
-        var testCommand = new Command("test", "Send 'Testing.' to the LLM and print the response.");
-
-        testCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-
-            var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = await configService.LoadConfigurationAsync();
-
-            if (config == null || !config.IsValid)
-            {
-                logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationInvalid}");
-                invocationContext.ExitCode = 1;
-                return;
-            }
-
-            var activeModel = await configService.GetActiveModelAsync();
-            await TestLLMConnection(serviceProvider, logger, config, activeModel);
-        });
-
-        // Define 'info' command
-        var infoCommand = new Command("info", "Display current configuration information.");
-
-        infoCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-
-            var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = await configService.LoadConfigurationAsync();
-
-            if (config == null)
-            {
-                logger.Error($"{Constants.UI.CrossMark} No configuration found");
-                logger.Information("💡 To configure GitGen, run: gitgen configure");
-                invocationContext.ExitCode = 1;
-                return;
-            }
-
-            DisplayConfigurationInfo(logger, config);
-        });
-
-        // Define 'model' command with subcommands
-        var modelCommand = new Command("model", "Manage AI models");
-        
-        // Subcommand: model set <name>
-        var modelSetCommand = new Command("set", "Set the default model");
-        var modelNameArgument = new Argument<string>("model-name", "The name of the model");
-        modelSetCommand.AddArgument(modelNameArgument);
-        
-        modelSetCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var modelName = invocationContext.ParseResult.GetValueForArgument(modelNameArgument);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-            
-            try
-            {
-                await secureConfig.SetDefaultModelAsync(modelName);
-                logger.Success($"{Constants.UI.CheckMark} Default model changed to '{modelName}'");
-                invocationContext.ExitCode = 0;
-            }
-            catch (Exception ex)
-            {
-                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
-                invocationContext.ExitCode = 1;
-            }
-        });
-        
-        // Subcommand: model delete <name>
-        var modelDeleteCommand = new Command("delete", "Delete a model");
-        modelDeleteCommand.AddArgument(modelNameArgument);
-        
-        modelDeleteCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var modelName = invocationContext.ParseResult.GetValueForArgument(modelNameArgument);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-            
-            try
-            {
-                // Confirm deletion
-                Console.Write($"Are you sure you want to delete model '{modelName}'? (y/N): ");
-                var confirm = Console.ReadLine()?.Trim().ToLower();
-                if (confirm != "y" && confirm != "yes")
-                {
-                    logger.Information("Deletion cancelled.");
-                    return;
-                }
-                
-                await secureConfig.DeleteModelAsync(modelName);
-                logger.Success($"{Constants.UI.CheckMark} Model '{modelName}' deleted successfully");
-                invocationContext.ExitCode = 0;
-            }
-            catch (Exception ex)
-            {
-                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
-                invocationContext.ExitCode = 1;
-            }
-        });
-        
-        // Subcommand: model info <name>
-        var modelInfoCommand = new Command("info", "Show detailed model information");
-        modelInfoCommand.AddArgument(modelNameArgument);
-        
-        modelInfoCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var modelName = invocationContext.ParseResult.GetValueForArgument(modelNameArgument);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-            
-            var model = await secureConfig.GetModelAsync(modelName);
-            if (model == null)
-            {
-                logger.Error($"{Constants.UI.CrossMark} Model '{modelName}' not found");
-                invocationContext.ExitCode = 1;
-                return;
-            }
-            
-            DisplayModelInfo(logger, model);
-            invocationContext.ExitCode = 0;
-        });
-        
-        // Subcommand: model alias
-        var modelAliasCommand = new Command("alias", "Manage model aliases");
-        
-        // Subcommand: model alias add <model> <alias>
-        var aliasAddCommand = new Command("add", "Add an alias to a model");
-        var aliasModelArgument = new Argument<string>("model", "The model name or ID");
-        var aliasNameArgument = new Argument<string>("alias", "The alias to add");
-        aliasAddCommand.AddArgument(aliasModelArgument);
-        aliasAddCommand.AddArgument(aliasNameArgument);
-        
-        aliasAddCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var modelName = invocationContext.ParseResult.GetValueForArgument(aliasModelArgument);
-            var alias = invocationContext.ParseResult.GetValueForArgument(aliasNameArgument);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-            
-            try
-            {
-                await secureConfig.AddAliasAsync(modelName, alias);
-                invocationContext.ExitCode = 0;
-            }
-            catch (Exception ex)
-            {
-                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
-                invocationContext.ExitCode = 1;
-            }
-        });
-        
-        // Subcommand: model alias remove <model> <alias>
-        var aliasRemoveCommand = new Command("remove", "Remove an alias from a model");
-        aliasRemoveCommand.AddArgument(aliasModelArgument);
-        aliasRemoveCommand.AddArgument(aliasNameArgument);
-        
-        aliasRemoveCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var modelName = invocationContext.ParseResult.GetValueForArgument(aliasModelArgument);
-            var alias = invocationContext.ParseResult.GetValueForArgument(aliasNameArgument);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-            
-            try
-            {
-                await secureConfig.RemoveAliasAsync(modelName, alias);
-                invocationContext.ExitCode = 0;
-            }
-            catch (Exception ex)
-            {
-                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
-                invocationContext.ExitCode = 1;
-            }
-        });
-        
-        // Subcommand: model alias list <model>
-        var aliasListCommand = new Command("list", "List aliases for a model");
-        aliasListCommand.AddArgument(aliasModelArgument);
-        
-        aliasListCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var modelName = invocationContext.ParseResult.GetValueForArgument(aliasModelArgument);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-            
-            try
-            {
-                var model = await secureConfig.GetModelAsync(modelName);
-                if (model == null)
-                {
-                    logger.Error($"{Constants.UI.CrossMark} Model '{modelName}' not found");
-                    invocationContext.ExitCode = 1;
-                    return;
-                }
-                
-                logger.Information($"{Constants.UI.ChartSymbol} Aliases for model '{model.Name}':");
-                
-                if (model.Aliases == null || model.Aliases.Count == 0)
-                {
-                    logger.Information("   No aliases configured");
-                }
-                else
-                {
-                    foreach (var alias in model.Aliases.OrderBy(a => a))
-                    {
-                        logger.Information($"   @{alias}");
-                    }
-                }
-                
-                invocationContext.ExitCode = 0;
-            }
-            catch (Exception ex)
-            {
-                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
-                invocationContext.ExitCode = 1;
-            }
-        });
-        
-        modelAliasCommand.AddCommand(aliasAddCommand);
-        modelAliasCommand.AddCommand(aliasRemoveCommand);
-        modelAliasCommand.AddCommand(aliasListCommand);
-        
-        modelCommand.AddCommand(modelSetCommand);
-        modelCommand.AddCommand(modelDeleteCommand);
-        modelCommand.AddCommand(modelInfoCommand);
-        modelCommand.AddCommand(modelAliasCommand);
-
-        // Define 'reset' command
-        var resetCommand = new Command("reset", "Reset all GitGen environment variables and configuration.");
-        resetCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-            await wizard.ResetConfiguration();
+            var menuService = serviceProvider.GetRequiredService<ConfigurationMenuService>();
+            await menuService.RunAsync();
             invocationContext.ExitCode = 0;
         });
 
-        // Define 'settings' command with subcommands
-        var settingsCommand = new Command("settings", "Quick settings management");
-
-        // Subcommand: settings tokens
-        var tokensCommand = new Command("tokens", "Change max output tokens");
-        tokensCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-            var success = await wizard.QuickChangeMaxTokens();
-            invocationContext.ExitCode = success ? 0 : 1;
-        });
-
-        // Subcommand: settings model
-        var modelQuickCommand = new Command("model", "Change AI model");
-        modelQuickCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-            var success = await wizard.QuickChangeModel();
-            invocationContext.ExitCode = success ? 0 : 1;
-        });
-
-        settingsCommand.AddCommand(tokensCommand);
-        settingsCommand.AddCommand(modelQuickCommand);
-
-        // Define 'prompt' command
-        var promptCommand = new Command("prompt", "Generate commit message with custom prompt instruction.");
-        var promptArgument = new Argument<string[]>("prompt-text", "The custom prompt instruction to guide the LLM")
-            { Arity = ArgumentArity.OneOrMore };
-        promptCommand.AddArgument(promptArgument);
-
-        promptCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var promptText = invocationContext.ParseResult.GetValueForArgument(promptArgument);
-            var customInstruction = string.Join(" ", promptText);
-
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-
-            var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = await configService.LoadConfigurationAsync();
-
-            if (config == null || !config.IsValid)
-            {
-                logger.Error($"{Constants.UI.CrossMark} {Constants.Messages.ConfigurationMissing}");
-                logger.Information($"{Constants.UI.InfoSymbol} Starting configuration wizard...");
-                Console.WriteLine();
-
-                var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-                var wizardConfig = await wizard.RunWizardAsync();
-
-                if (wizardConfig == null)
-                {
-                    logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationSetupFailed}");
-                    invocationContext.ExitCode = 1;
-                    return;
-                }
-
-                config = wizardConfig;
-                logger.Success($"{Constants.UI.CheckMark} {Constants.Messages.ConfigurationSaved}");
-                Console.WriteLine();
-            }
-
-            var activeModel = await configService.GetActiveModelAsync();
-            await GenerateCommitMessage(serviceProvider, logger, config, customInstruction, activeModel);
-        });
-
-        // Define 'health' command
-        var healthCommand = new Command("health", "Display configuration info and test LLM connection.");
-
-        healthCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-
-            var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = await configService.LoadConfigurationAsync();
-
-            if (config == null)
-            {
-                logger.Error($"{Constants.UI.CrossMark} No configuration found");
-                logger.Information("💡 To configure GitGen, run: gitgen configure");
-                invocationContext.ExitCode = 1;
-                return;
-            }
-
-            // First display configuration info
-            DisplayConfigurationInfo(logger, config);
-
-            // Add a separator between info and test
-            Console.WriteLine();
-            logger.Information("═════════════════════════════════════════════════════════════");
-            Console.WriteLine();
-
-            // Then test LLM connection if config is valid
-            if (config.IsValid)
-            {
-                var activeModel = await configService.GetActiveModelAsync();
-                await TestLLMConnection(serviceProvider, logger, config, activeModel);
-            }
-            else
-            {
-                logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationInvalid}");
-                logger.Information("💡 To configure GitGen, run: gitgen configure");
-                invocationContext.ExitCode = 1;
-            }
-        });
-
-        // Define 'list' command
-        var listCommand = new Command("list", "List all configured models");
-        
-        listCommand.SetHandler(async invocationContext =>
-        {
-            ConsoleLogger.SetDebugMode(false);
-            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
-            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
-            var settings = await secureConfig.LoadSettingsAsync();
-            
-            if (!settings.Models.Any())
-            {
-                logger.Information("No models configured. Run 'gitgen configure' to add a model.");
-                return;
-            }
-            
-            logger.Information($"{Constants.UI.ChartSymbol} Configured Models ({settings.Models.Count}):");
-            Console.WriteLine();
-            
-            foreach (var model in settings.Models.OrderBy(m => m.Name))
-            {
-                var defaultMarker = model.Id == settings.DefaultModelId ? " ⭐" : "";
-                var lastUsed = model.LastUsed.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
-                
-                logger.Information($"  {model.Name}{defaultMarker}");
-                logger.Muted($"    Provider: {model.ProviderType} | Model: {model.ModelId}");
-                
-                if (!string.IsNullOrWhiteSpace(model.Note))
-                    logger.Muted($"    Note: {model.Note}");
-                
-                if (model.Aliases != null && model.Aliases.Count > 0)
-                {
-                    var aliasesStr = string.Join(", ", model.Aliases.OrderBy(a => a).Select(a => $"@{a}"));
-                    logger.Muted($"    Aliases: {aliasesStr}");
-                }
-                    
-                if (model.Pricing != null)
-                {
-                    var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
-                    logger.Muted($"    Pricing: {pricingInfo}");
-                }
-                
-                logger.Muted($"    Last used: {lastUsed}");
-                Console.WriteLine();
-            }
-        });
 
         // Define 'help' command
         var helpCommand = new Command("help", "Display help information.");
@@ -602,41 +270,36 @@ internal class Program
             Console.WriteLine(rootCommand.Description);
             Console.WriteLine();
             Console.WriteLine("Usage:");
-            Console.WriteLine("  gitgen [options]");
-            Console.WriteLine("  gitgen [command]");
-            Console.WriteLine("  gitgen @<model> [prompt]     Use specific model via alias");
-            Console.WriteLine("  gitgen [prompt] @<model>     Alternative alias syntax");
+            Console.WriteLine("  gitgen                       Generate commit message with default model");
+            Console.WriteLine("  gitgen [prompt]              Generate with custom prompt");
+            Console.WriteLine("  gitgen @<model>              Generate with specific model or alias");
+            Console.WriteLine("  gitgen [prompt] @<model>     Generate with custom prompt and model");
+            Console.WriteLine("  gitgen @<model> [prompt]     Alternative syntax");
+            Console.WriteLine("  gitgen [command] [options]   Run a specific command");
+            Console.WriteLine();
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  gitgen");
+            Console.WriteLine("  gitgen \"must be a haiku\"");
+            Console.WriteLine("  gitgen @fast                 # Use your fast model");
+            Console.WriteLine("  gitgen @free                 # Use free model for public repos");
+            Console.WriteLine("  gitgen \"focus on security\" @ultrathink");
+            Console.WriteLine("  gitgen @sonnet \"explain the refactoring\"");
+            Console.WriteLine();
+            Console.WriteLine("💡 Tip: Configure a free model as @free to save money on public repositories");
+            Console.WriteLine("   where sending code to free APIs doesn't matter.");
             Console.WriteLine();
             Console.WriteLine("Options:");
-            Console.WriteLine(
-                "  -p, --prompt <prompt>  Custom prompt to focus guide/focus LLM when generating commit message.");
-            Console.WriteLine("  -d, --debug            Enable debug logging.");
+            Console.WriteLine("  -d, --debug            Enable debug logging");
             Console.WriteLine("  -v, --version          Show version information");
             Console.WriteLine("  -?, -h, --help         Show help and usage information");
             Console.WriteLine();
             Console.WriteLine("Commands:");
-            Console.WriteLine("  configure              Run the interactive configuration wizard.");
-            Console.WriteLine("  test                   Send 'Testing.' to the LLM and print the response.");
-            Console.WriteLine("  info                   Display current configuration information.");
-            Console.WriteLine("  list                   List all configured models");
-            Console.WriteLine("  model                  Manage AI models (set, delete, info, alias)");
-            Console.WriteLine("  reset                  Reset all GitGen environment variables and configuration.");
-            Console.WriteLine("  settings               Quick settings management");
-            Console.WriteLine("  prompt <prompt-text>   Generate commit message with custom prompt instruction.");
-            Console.WriteLine("  health                 Display configuration info and test LLM connection.");
-            Console.WriteLine("  help                   Display help information.");
+            Console.WriteLine("  config                 Run the interactive configuration menu");
+            Console.WriteLine("  help                   Display help information");
             Console.WriteLine();
         });
 
-        rootCommand.AddCommand(configureCommand);
-        rootCommand.AddCommand(testCommand);
-        rootCommand.AddCommand(infoCommand);
-        rootCommand.AddCommand(listCommand);
-        rootCommand.AddCommand(modelCommand);
-        rootCommand.AddCommand(resetCommand);
-        rootCommand.AddCommand(settingsCommand);
-        rootCommand.AddCommand(promptCommand);
-        rootCommand.AddCommand(healthCommand);
+        rootCommand.AddCommand(configCommand);
         rootCommand.AddCommand(helpCommand);
         return rootCommand;
     }
@@ -676,8 +339,38 @@ internal class Program
 
             Console.WriteLine();
 
-            await ClipboardService.SetTextAsync(result.Message);
-            logger.Information($"{Constants.UI.ClipboardSymbol} {Constants.Messages.CommitMessageCopied}");
+            // Get app settings
+            var secureConfig = sp.GetRequiredService<ISecureConfigurationService>();
+            var settings = await secureConfig.LoadSettingsAsync();
+
+            // Display token usage if enabled
+            if (settings.Settings.ShowTokenUsage && result.InputTokens.HasValue && result.OutputTokens.HasValue)
+            {
+                var tokenInfo = $"Generated with {result.InputTokens:N0} input tokens, {result.OutputTokens:N0} output tokens ({result.TotalTokens:N0} total)";
+                
+                // Add cost if pricing is configured
+                if (activeModel?.Pricing != null)
+                {
+                    var cost = CostCalculationService.CalculateAndFormatCost(
+                        activeModel, 
+                        result.InputTokens.Value, 
+                        result.OutputTokens.Value);
+                    if (!string.IsNullOrEmpty(cost))
+                    {
+                        tokenInfo += $" • Estimated cost: {cost}";
+                    }
+                }
+                
+                logger.Muted(tokenInfo);
+                Console.WriteLine();
+            }
+
+            // Copy to clipboard if enabled
+            if (settings.Settings.CopyToClipboard)
+            {
+                await ClipboardService.SetTextAsync(result.Message);
+                logger.Information($"{Constants.UI.ClipboardSymbol} {Constants.Messages.CommitMessageCopied}");
+            }
         }
         catch (AuthenticationException ex)
         {
@@ -694,101 +387,36 @@ internal class Program
         }
     }
 
-    private static async Task TestLLMConnection(IServiceProvider sp, IConsoleLogger logger, GitGenConfiguration config, ModelConfiguration? activeModel = null)
+    private static async Task<bool> TestLLMConnection(IServiceProvider sp, IConsoleLogger logger, GitGenConfiguration config, ModelConfiguration? activeModel = null, string indent = "")
     {
         try
         {
-            logger.Information($"{Constants.UI.TestTubeSymbol} {Constants.Messages.TestingConnection}");
+            logger.Information($"{indent}{Constants.UI.TestTubeSymbol} {Constants.Messages.TestingConnection}");
 
             var providerFactory = sp.GetRequiredService<ProviderFactory>();
             var provider = providerFactory.CreateProvider(config, activeModel);
 
             logger.Information(
-                $"{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {config.BaseUrl} ({config.Model ?? Constants.Fallbacks.UnknownModelName})");
+                $"{indent}{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {config.BaseUrl} ({config.Model ?? Constants.Fallbacks.UnknownModelName})");
 
             var result = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
 
-            Console.WriteLine();
-            logger.Success($"{Constants.UI.CheckMark} LLM Response:");
-
-            // Display response in teal color for visibility
-            logger.Highlight($"{Constants.UI.CommitMessageQuotes}{result.Message}{Constants.UI.CommitMessageQuotes}",
-                ConsoleColor.DarkCyan);
-
-            Console.WriteLine();
-            logger.Success($"{Constants.UI.PartySymbol} Test completed successfully!");
+            logger.Success($"{indent}{Constants.UI.CheckMark} LLM Response: \"{result.Message}\"");
+            return true;
         }
         catch (Exception ex)
         {
-            logger.Error(ex, "Failed to test LLM connection");
-            logger.Error($"{Constants.UI.CrossMark} Test failed: {{Message}}", ex.Message);
+            logger.Error($"{indent}{Constants.UI.CrossMark} Test failed: {ex.Message}");
+            return false;
         }
     }
 
-    private static void DisplayConfigurationInfo(IConsoleLogger logger, GitGenConfiguration config)
-    {
-        logger.Information("📋 Current GitGen Configuration:");
-        Console.WriteLine();
-
-        // Configuration status
-        var statusEmoji = config.IsValid ? "✅" : "❌";
-        var statusText = config.IsValid ? "Valid" : "Invalid";
-        logger.Information($"{statusEmoji} Configuration Status: {statusText}");
-        Console.WriteLine();
-
-        // Display configuration values
-        logger.Information("🔧 Configuration Values:");
-        logger.Information($"   Provider Type:     {config.ProviderType ?? "(not set)"}");
-        logger.Information($"   Base URL:          {config.BaseUrl ?? "(not set)"}");
-        logger.Information($"   Model:             {config.Model ?? "(not set)"}");
-
-        // Mask API key for security
-        var maskedApiKey = string.IsNullOrEmpty(config.ApiKey)
-            ? "(not set)"
-            : $"{config.ApiKey[..Math.Min(8, config.ApiKey.Length)]}..." +
-              new string('*', Math.Max(0, config.ApiKey.Length - 8));
-        logger.Information($"   API Key:           {maskedApiKey}");
-
-        logger.Information($"   Requires Auth:     {config.RequiresAuth}");
-        logger.Information($"   Legacy Max Tokens: {config.OpenAiUseLegacyMaxTokens}");
-        logger.Information($"   Temperature:       {config.Temperature}");
-
-        Console.WriteLine();
-
-        // Display environment variable information
-        logger.Information("🌍 Environment Variables:");
-        DisplayEnvVar(logger, "GITGEN_PROVIDERTYPE", config.ProviderType);
-        DisplayEnvVar(logger, "GITGEN_BASEURL", config.BaseUrl);
-        DisplayEnvVar(logger, "GITGEN_MODEL", config.Model);
-        DisplayEnvVar(logger, "GITGEN_APIKEY", config.ApiKey, true);
-        DisplayEnvVar(logger, "GITGEN_REQUIRESAUTH", config.RequiresAuth.ToString());
-        DisplayEnvVar(logger, "GITGEN_OPENAI_USE_LEGACY_MAX_TOKENS", config.OpenAiUseLegacyMaxTokens.ToString());
-        DisplayEnvVar(logger, "GITGEN_TEMPERATURE", config.Temperature.ToString());
-
-        Console.WriteLine();
-
-        if (!config.IsValid) logger.Information("💡 To configure GitGen, run: gitgen configure");
-    }
-
-    private static void DisplayEnvVar(IConsoleLogger logger, string varName, string? value, bool maskValue = false)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            logger.Information($"   {varName}: (not set)");
-        }
-        else
-        {
-            var displayValue = maskValue
-                ? $"{value[..Math.Min(8, value.Length)]}..." + new string('*', Math.Max(0, value.Length - 8))
-                : value;
-            logger.Information($"   {varName}: {displayValue}");
-        }
-    }
 
     private static void DisplayModelInfo(IConsoleLogger logger, ModelConfiguration model)
     {
         logger.Information($"{Constants.UI.ChartSymbol} Model: {model.Name}");
-        logger.Information($"   Provider: {model.ProviderType}");
+        logger.Information($"   Type: {model.Type}");
+        logger.Information($"   Provider: {model.Provider}");
         logger.Information($"   URL: {model.Url}");
         logger.Information($"   Model ID: {model.ModelId}");
         
@@ -825,42 +453,84 @@ internal class Program
         {
             var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
             logger.Information($"   Pricing: {pricingInfo}");
-            logger.Muted($"   Pricing updated: {model.Pricing.UpdatedAt.ToLocalTime():yyyy-MM-dd}");
+            logger.Muted($"   Pricing updated: {DateTimeHelper.ToLocalDateString(model.Pricing.UpdatedAt)}");
         }
         
-        logger.Information($"   Is Default: {model.IsDefault}");
-        logger.Muted($"   Created: {model.CreatedAt.ToLocalTime():yyyy-MM-dd}");
-        logger.Muted($"   Last used: {model.LastUsed.ToLocalTime():yyyy-MM-dd HH:mm}");
+        logger.Muted($"   Created: {DateTimeHelper.ToLocalDateString(model.CreatedAt)}");
+        logger.Muted($"   Last used: {DateTimeHelper.ToLocalDateTimeString(model.LastUsed)}");
     }
 
+
     /// <summary>
-    ///     Parses input arguments to extract @model syntax and custom prompt.
+    ///     Displays available models when an alias is not found.
     /// </summary>
-    /// <param name="args">The input arguments from command line.</param>
-    /// <returns>Tuple of (modelName, prompt) extracted from the arguments.</returns>
-    private static (string? modelName, string? prompt) ParseInputForModelAndPrompt(string[] args)
+    private static async Task DisplayModelSuggestions(IServiceProvider serviceProvider, IConsoleLogger logger, string requestedAlias)
     {
-        if (args == null || args.Length == 0)
-            return (null, null);
+        logger.Error($"{Constants.UI.CrossMark} Model or alias '{requestedAlias}' not found");
+        Console.WriteLine();
         
-        string? modelName = null;
-        var promptParts = new List<string>();
+        var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+        var settings = await secureConfig.LoadSettingsAsync();
         
-        foreach (var arg in args)
+        if (!settings.Models.Any())
         {
-            if (arg.StartsWith("@") && arg.Length > 1)
+            logger.Information("No models configured. Run 'gitgen config' to add a model.");
+            return;
+        }
+        
+        // Check if partial matching is enabled and filter suggestions
+        var modelsToShow = settings.Models;
+        if (settings.Settings.EnablePartialAliasMatching && 
+            requestedAlias.Length >= settings.Settings.MinimumAliasMatchLength)
+        {
+            var partialMatches = await secureConfig.GetModelsByPartialMatchAsync(requestedAlias);
+            if (partialMatches.Any())
             {
-                // Extract model name (everything after @)
-                modelName = arg.Substring(1);
+                modelsToShow = partialMatches;
+                logger.Information($"{Constants.UI.BulbSymbol} Did you mean one of these models matching '{requestedAlias}'?");
             }
             else
             {
-                // Everything else is part of the prompt
-                promptParts.Add(arg);
+                logger.Information($"{Constants.UI.BulbSymbol} No models match '{requestedAlias}'. Here are all available models:");
             }
         }
+        else
+        {
+            logger.Information($"{Constants.UI.BulbSymbol} Did you mean one of these?");
+        }
         
-        var prompt = promptParts.Count > 0 ? string.Join(" ", promptParts) : null;
-        return (modelName, prompt);
+        Console.WriteLine();
+        
+        // Display filtered models with their details
+        foreach (var model in modelsToShow.OrderBy(m => m.Name))
+        {
+            var defaultMarker = model.Id == settings.DefaultModelId ? " ⭐ (default)" : "";
+            logger.Success($"  {model.Name}{defaultMarker}");
+            
+            // Show aliases if any
+            if (model.Aliases != null && model.Aliases.Count > 0)
+            {
+                var aliasesStr = string.Join(", ", model.Aliases.OrderBy(a => a).Select(a => $"@{a}"));
+                logger.Information($"    Aliases: {aliasesStr}");
+            }
+            
+            // Show model details
+            logger.Muted($"    Type: {model.Type} | Provider: {model.Provider} | Model: {model.ModelId}");
+            logger.Muted($"    URL: {model.Url}");
+            
+            // Show pricing if available
+            if (model.Pricing != null)
+            {
+                var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+                logger.Muted($"    Pricing: {pricingInfo}");
+            }
+            
+            Console.WriteLine();
+        }
+        
+        logger.Information($"{Constants.UI.InfoSymbol} Usage examples:");
+        logger.Information("  gitgen @modelname");
+        logger.Information("  gitgen \"your prompt\" @modelname");
+        logger.Information("  gitgen @modelname \"your prompt\"");
     }
 }

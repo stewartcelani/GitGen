@@ -12,6 +12,7 @@ public static class Constants
     {
         // Provider Types
         public const string ProviderTypeOpenAI = "openai";
+        public const string ProviderTypeOpenAICompatible = "openai-compatible";
 
         // Temperature Settings
         public const double DefaultTemperature = 0.2;
@@ -55,9 +56,6 @@ public static class Constants
         public const string ConfigurationSaved = "Configuration saved successfully!";
         public const string ConfigurationTestSuccessful = "Configuration test successful!";
 
-        public const string RestartTerminalWarning =
-            "You may need to restart your terminal for the changes to take effect.";
-
         // Generation Process
         public const string GeneratingCommitMessage = "Generating commit message...";
         public const string CommitMessageCopied = "Commit message copied to clipboard.";
@@ -67,9 +65,9 @@ public static class Constants
         public const string WelcomeToWizard = "Welcome to the GitGen configuration wizard.";
         public const string WizardGuidance = "This will guide you through setting up your AI provider.";
 
-        // Reset
-        public const string ConfigurationReset = "GitGen configuration reset successfully!";
-        public const string ResettingConfiguration = "Resetting GitGen configuration...";
+        // Model Management
+        public const string ModelDeleted = "Model '{0}' deleted successfully.";
+        public const string ModelSet = "Default model set to '{0}'.";
     }
 
     /// <summary>
@@ -81,7 +79,7 @@ public static class Constants
         public const string AuthenticationFailed =
             "Authentication failed. Your API key appears to be invalid or expired.";
 
-        public const string AuthenticationFailedGuidance = "To fix this issue, please run: gitgen configure";
+        public const string AuthenticationFailedGuidance = "To fix this issue, please run: gitgen config";
 
         public const string AuthenticationFailedDetail =
             "This will guide you through updating your API key and configuration.";
@@ -92,7 +90,7 @@ public static class Constants
         public const string ConfigurationSetupFailed = "Configuration setup failed or was cancelled.";
 
         public const string ConfigurationInvalid =
-            "Configuration is missing or invalid. Please run 'gitgen configure' first.";
+            "Configuration is missing or invalid. Please run 'gitgen config' first.";
 
         // API Errors
         public const string ApiRequestFailed = "API request failed with status {0}: {1}";
@@ -100,14 +98,7 @@ public static class Constants
         public const string ParameterDetectionFailed = "Failed to detect API parameters";
 
         public const string SelfHealingFailed =
-            "Failed to auto-correct API parameter configuration. Please run 'gitgen configure'.";
-
-        // Environment Variables
-        public const string ShellProfileNotFound =
-            "Could not determine shell profile (~/.bashrc, ~/.zshrc, etc.). Please set variables manually:";
-
-        public const string FailedToUpdateShellProfile = "Failed to update shell profile {0}: {1}";
-        public const string FailedToClearVariable = "Failed to clear environment variable {0}: {1}";
+            "Failed to auto-correct API parameter configuration. Please run 'gitgen config'.";
 
         // Generation
         public const string GenerationFailed = "Failed to generate commit message";
@@ -126,44 +117,9 @@ public static class Constants
         public const string ValueCannotBeEmpty = "This value cannot be empty.";
 
         public const string TokensOutOfRange =
-            "GITGEN_MAX_OUTPUT_TOKENS value {0} is out of range ({1}-{2}). Using default value {3}.";
+            "Max output tokens value {0} is out of range ({1}-{2}). Using default value {3}.";
 
         public const string InvalidTokenRange = "Please enter a number between {0} and {1}.";
-    }
-
-    /// <summary>
-    ///     Environment variable names and prefixes used by GitGen.
-    /// </summary>
-    public static class EnvironmentVariables
-    {
-        public const string Prefix = "GITGEN_";
-
-        // Core Configuration
-        public const string ProviderType = "GITGEN_PROVIDERTYPE";
-        public const string BaseUrl = "GITGEN_BASEURL";
-        public const string Model = "GITGEN_MODEL";
-        public const string ApiKey = "GITGEN_APIKEY";
-        public const string RequiresAuth = "GITGEN_REQUIRESAUTH";
-
-        // OpenAI Specific
-        public const string UseLegacyMaxTokens = "GITGEN_OPENAI_USE_LEGACY_MAX_TOKENS";
-        public const string Temperature = "GITGEN_TEMPERATURE";
-        public const string MaxOutputTokens = "GITGEN_MAX_OUTPUT_TOKENS";
-
-        /// <summary>
-        ///     All GitGen environment variable names (without GITGEN_ prefix) for cleanup operations.
-        /// </summary>
-        public static readonly string[] AllVariableNames =
-        {
-            "PROVIDERTYPE",
-            "BASEURL",
-            "MODEL",
-            "APIKEY",
-            "REQUIRESAUTH",
-            "OPENAI_USE_LEGACY_MAX_TOKENS",
-            "TEMPERATURE",
-            "MAX_OUTPUT_TOKENS"
-        };
     }
 
     /// <summary>
@@ -200,6 +156,34 @@ public static class Constants
     }
 
     /// <summary>
+    ///     Provider-specific constants for automatic provider detection and naming.
+    /// </summary>
+    public static class Providers
+    {
+        // Provider Names
+        public const string OpenAI = "OpenAI";
+        public const string Azure = "Azure";
+        public const string Anthropic = "Anthropic";
+        public const string GoogleGemini = "Google Gemini";
+        public const string GoogleVertex = "Google Vertex AI";
+        public const string Groq = "Groq";
+        public const string OpenRouter = "OpenRouter";
+        public const string XAI = "xAI";
+        public const string Local = "Local";
+
+        // Provider URL Patterns for auto-detection
+        public const string OpenAIUrlPattern = "https://api.openai.com/";
+        public const string AnthropicUrlPattern = "https://api.anthropic.com/";
+        public const string GoogleGeminiUrlPattern = "generativelanguage.googleapis.com";
+        public const string GoogleVertexUrlPattern = "aiplatform.googleapis.com";
+        public const string GroqUrlPattern = "https://api.groq.com/";
+        public const string OpenRouterUrlPattern = "https://openrouter.ai/";
+        public const string XAIUrlPattern = "https://api.x.ai/";
+        public const string AzureUrlPattern = "openai.azure.com";
+        public const string LocalUrlPattern = "http://localhost";
+    }
+
+    /// <summary>
     ///     UI and formatting constants for consistent user experience.
     /// </summary>
     public static class UI
@@ -227,30 +211,29 @@ public static class Constants
         public const int DebugLevelPadding = 7;
         public const string CommitMessageQuotes = "\"";
 
-        // Configuration Section Header
-        public const string GitGenConfigSection = "# GitGen Configuration (managed by gitgen)";
-        public const string GitGenConfigSectionWizard = "# GitGen Configuration (managed by gitgen configure)";
-        public const string GitGenConfigSectionModel = "# GitGen Configuration (managed by gitgen model)";
+        // Configuration Section Header (kept for historical reference if needed)
+        public const string GitGenConfigSection = "# GitGen Configuration";
     }
 
     /// <summary>
-    ///     Shell and platform-specific constants.
+    ///     Culture-aware date format specifiers for consistent date/time display.
     /// </summary>
-    public static class Platform
+    public static class DateFormats
     {
-        // Shell Types
-        public const string ZshShell = "zsh";
-        public const string BashShell = "bash";
-
-        // Profile Files
-        public const string ZshProfile = ".zshrc";
-        public const string BashProfile = ".bashrc";
-        public const string GenericProfile = ".profile";
-
-        // Environment Variable Export
-        public const string ExportPrefix = "export ";
-        public const string ExportFormat = "export {0}=\"{1}\"";
-        public const string ExportStartPattern = "export GITGEN_";
+        /// <summary>Short date pattern (e.g., 1/27/2025 for US, 27/01/2025 for AU)</summary>
+        public const string ShortDate = "d";
+        
+        /// <summary>Long date pattern (e.g., Monday, January 27, 2025 for US)</summary>
+        public const string LongDate = "D";
+        
+        /// <summary>Short date/time pattern (e.g., 1/27/2025 2:32 PM for US)</summary>
+        public const string ShortDateTime = "g";
+        
+        /// <summary>Short time pattern (e.g., 2:32 PM for US, 14:32 for many EU countries)</summary>
+        public const string ShortTime = "t";
+        
+        /// <summary>Invariant format for filenames and technical use (always yyyyMMddHHmmss)</summary>
+        public const string InvariantFileTimestamp = "yyyyMMddHHmmss";
     }
 
     /// <summary>

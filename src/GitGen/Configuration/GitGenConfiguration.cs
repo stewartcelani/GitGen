@@ -3,14 +3,20 @@ using GitGen.Services;
 namespace GitGen.Configuration;
 
 /// <summary>
-///     Holds all configuration for GitGen, loaded from environment variables.
+///     Holds all configuration for GitGen.
 /// </summary>
 public class GitGenConfiguration
 {
     /// <summary>
-    ///     The high-level provider type, e.g., "openai".
+    ///     The API compatibility type, e.g., "openai-compatible".
     /// </summary>
-    public string? ProviderType { get; set; }
+    public string? Type { get; set; }
+
+    /// <summary>
+    ///     The provider name (e.g., "openrouter.ai", "OpenAI", "Anthropic").
+    ///     This can be the domain extracted from the URL or a custom name set by the user.
+    /// </summary>
+    public string? Provider { get; set; }
 
     public string? BaseUrl { get; set; }
     public string? Model { get; set; }
@@ -37,7 +43,7 @@ public class GitGenConfiguration
     /// <summary>
     ///     Maximum number of tokens the AI model should generate in responses.
     ///     Defaults to 5000. Higher values (6000+) recommended for reasoning models.
-    ///     Can be adjusted anytime using 'gitgen configure'.
+    ///     Can be adjusted anytime using 'gitgen config'.
     /// </summary>
     public int MaxOutputTokens { get; set; } = 5000;
 
@@ -51,10 +57,48 @@ public class GitGenConfiguration
     ///     Validates that the configuration has all necessary values and passes comprehensive validation.
     /// </summary>
     public bool IsValid =>
-        ValidationService.Provider.IsValid(ProviderType) &&
+        ValidationService.Provider.IsValid(Type) &&
         ValidationService.Url.IsValid(BaseUrl) &&
         ValidationService.Model.IsValid(Model) &&
         ValidationService.ApiKey.IsValid(ApiKey, RequiresAuth) &&
         ValidationService.Temperature.IsValid(Temperature) &&
         ValidationService.TokenCount.IsValid(MaxOutputTokens);
+
+    /// <summary>
+    ///     Gets a detailed validation report for debugging purposes.
+    /// </summary>
+    /// <returns>A dictionary of field names and their validation errors.</returns>
+    public Dictionary<string, string> GetValidationErrors()
+    {
+        var errors = new Dictionary<string, string>();
+
+        if (!ValidationService.Provider.IsValid(Type))
+            errors["Type"] = ValidationService.Provider.GetValidationError(Type);
+
+        if (!ValidationService.Url.IsValid(BaseUrl))
+            errors["BaseUrl"] = ValidationService.Url.GetValidationError(BaseUrl);
+
+        if (!ValidationService.Model.IsValid(Model))
+            errors["Model"] = ValidationService.Model.GetValidationError(Model);
+
+        if (!ValidationService.ApiKey.IsValid(ApiKey, RequiresAuth))
+            errors["ApiKey"] = ValidationService.ApiKey.GetValidationError(ApiKey, RequiresAuth);
+
+        if (!ValidationService.Temperature.IsValid(Temperature))
+            errors["Temperature"] = ValidationService.Temperature.GetValidationError(Temperature);
+
+        if (!ValidationService.TokenCount.IsValid(MaxOutputTokens))
+            errors["MaxOutputTokens"] = ValidationService.TokenCount.GetValidationError(MaxOutputTokens);
+
+        return errors;
+    }
+
+    /// <summary>
+    ///     Checks if the configuration has any values set (not necessarily valid).
+    /// </summary>
+    public bool HasAnyConfiguration =>
+        !string.IsNullOrEmpty(Type) ||
+        !string.IsNullOrEmpty(BaseUrl) ||
+        !string.IsNullOrEmpty(Model) ||
+        !string.IsNullOrEmpty(ApiKey);
 }

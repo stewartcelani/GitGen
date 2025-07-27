@@ -214,20 +214,23 @@ public class OpenAIParameterDetector
                 httpRequest.Headers.Authorization = new AuthenticationHeaderValue(Constants.Api.BearerPrefix, _apiKey);
         }
 
-        var response = await _httpClient.SendAsync(httpRequest);
-
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var error = await response.Content.ReadAsStringAsync();
-            _logger.Debug("API error during parameter detection: {StatusCode} - {Error}", response.StatusCode, error);
-
-            throw new HttpRequestException(
-                string.Format(Constants.ErrorMessages.ApiRequestFailed, response.StatusCode, error),
-                null,
-                response.StatusCode);
+            // Use HttpRequestOptions.ForProbing to suppress error logging during parameter detection
+            // Since we expect failures during probing, we don't want to spam the user with error messages
+            var response = await _httpClient.SendAsync(httpRequest, GitGen.Services.HttpRequestOptions.ForProbing);
+            return response;
         }
-
-        return response;
+        catch (HttpResponseException ex)
+        {
+            // Convert to HttpRequestException for compatibility with existing error handling
+            _logger.Debug("API error during parameter detection: {StatusCode} - {Error}", ex.StatusCode, ex.ResponseBody);
+            
+            throw new HttpRequestException(
+                string.Format(Constants.ErrorMessages.ApiRequestFailed, ex.StatusCode, ex.Message),
+                ex,
+                ex.StatusCode);
+        }
     }
 
     /// <summary>
@@ -271,6 +274,11 @@ public class OpenAIParameterDetector
 
             _logger.Debug("API connection validated successfully");
             return true;
+        }
+        catch (HttpResponseException ex) when (ex.IsAuthenticationError)
+        {
+            _logger.Error("Authentication failed during connection validation");
+            throw new AuthenticationException(Constants.ErrorMessages.AuthenticationFailed, ex);
         }
         catch (HttpRequestException ex) when (IsAuthenticationError(ex))
         {

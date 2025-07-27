@@ -60,10 +60,44 @@ public class SecureConfigurationService : ISecureConfigurationService
 
         try
         {
-            var encryptedData = await File.ReadAllTextAsync(_configPath);
-            var jsonData = _protector.Unprotect(encryptedData);
-            _cachedSettings = JsonSerializer.Deserialize(jsonData, ConfigurationJsonContext.Default.GitGenSettings) 
-                ?? new GitGenSettings();
+            var fileContent = await File.ReadAllTextAsync(_configPath);
+            
+            // Try to decrypt first (normal case)
+            try
+            {
+                var jsonData = _protector.Unprotect(fileContent);
+                _cachedSettings = JsonSerializer.Deserialize(jsonData, ConfigurationJsonContext.Default.GitGenSettings) 
+                    ?? new GitGenSettings();
+            }
+            catch (Exception decryptEx)
+            {
+                _logger.Debug("Failed to decrypt configuration, trying as plain JSON: {Message}", decryptEx.Message);
+                
+                // Fallback: try to read as unencrypted JSON (for debugging or recovery)
+                try
+                {
+                    _cachedSettings = JsonSerializer.Deserialize(fileContent, ConfigurationJsonContext.Default.GitGenSettings) 
+                        ?? new GitGenSettings();
+                    _logger.Warning("Loaded unencrypted configuration - will re-encrypt on next save");
+                }
+                catch
+                {
+                    // If both decryption and plain JSON fail, it's corrupted
+                    _logger.Error("Configuration file is corrupted and cannot be loaded");
+                    
+                    // Backup the corrupted file
+                    var backupPath = _configPath + ".corrupt." + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                    File.Copy(_configPath, backupPath, true);
+                    _logger.Information("Corrupted config backed up to: {Path}", backupPath);
+                    
+                    // Return empty settings
+                    _cachedSettings = new GitGenSettings 
+                    { 
+                        Settings = new AppSettings { ConfigPath = _configPath } 
+                    };
+                    return _cachedSettings;
+                }
+            }
             
             // Ensure settings object exists
             if (_cachedSettings.Settings == null)
@@ -72,11 +106,17 @@ public class SecureConfigurationService : ISecureConfigurationService
             _cachedSettings.Settings.ConfigPath = _configPath;
             
             _logger.Debug("Successfully loaded configuration with {Count} models", _cachedSettings.Models.Count);
+            if (_cachedSettings.Models.Count > 0)
+            {
+                _logger.Debug("Default model ID: {DefaultId}, First model: {FirstModel}", 
+                    _cachedSettings.DefaultModelId ?? "(none)",
+                    _cachedSettings.Models.FirstOrDefault()?.Name ?? "(none)");
+            }
             return _cachedSettings;
         }
         catch (Exception ex)
         {
-            _logger.Error(ex, "Failed to load configuration from {Path}", _configPath);
+            _logger.Error(ex, "Failed to read configuration file from {Path}", _configPath);
             _cachedSettings = new GitGenSettings 
             { 
                 Settings = new AppSettings { ConfigPath = _configPath } 
@@ -100,6 +140,9 @@ public class SecureConfigurationService : ISecureConfigurationService
             
             _cachedSettings = settings;
             _logger.Debug("Configuration saved successfully to {Path}", _configPath);
+            _logger.Debug("Saved {Count} models, default model ID: {DefaultId}", 
+                settings.Models.Count, 
+                settings.DefaultModelId ?? "(none)");
         }
         catch (Exception ex)
         {
@@ -132,21 +175,23 @@ public class SecureConfigurationService : ISecureConfigurationService
             return model;
         }
 
-        // Try fuzzy match by name prefix
-        var fuzzyMatches = settings.Models
-            .Where(m => m.Name.StartsWith(nameOrId, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (fuzzyMatches.Count == 1)
+        // If no exact match found and partial matching is enabled, try partial matching
+        if (settings.Settings.EnablePartialAliasMatching && 
+            nameOrId.Length >= settings.Settings.MinimumAliasMatchLength)
         {
-            _logger.Debug("Fuzzy matched '{Input}' to model '{Model}'", nameOrId, fuzzyMatches[0].Name);
-            return fuzzyMatches[0];
-        }
-
-        if (fuzzyMatches.Count > 1)
-        {
-            var matchNames = string.Join(", ", fuzzyMatches.Select(m => m.Name));
-            _logger.Warning("Multiple models match '{Input}': {Matches}", nameOrId, matchNames);
+            var partialMatches = await GetModelsByPartialMatchAsync(nameOrId);
+            
+            if (partialMatches.Count == 1)
+            {
+                _logger.Debug("Partial matched '{Input}' to model '{Model}'", nameOrId, partialMatches[0].Name);
+                return partialMatches[0];
+            }
+            
+            if (partialMatches.Count > 1)
+            {
+                var matchNames = string.Join(", ", partialMatches.Select(m => m.Name));
+                _logger.Debug("Multiple models match '{Input}': {Matches}", nameOrId, matchNames);
+            }
         }
 
         return null;
@@ -240,64 +285,10 @@ public class SecureConfigurationService : ISecureConfigurationService
         
         settings.DefaultModelId = model.Id;
         
-        // Update IsDefault flags
-        foreach (var m in settings.Models)
-            m.IsDefault = m.Id == model.Id;
-        
         await SaveSettingsAsync(settings);
         _logger.Debug("Set model '{Name}' as default", model.Name);
     }
 
-    /// <inheritdoc />
-    public async Task<bool> MigrateFromEnvironmentVariablesAsync()
-    {
-        _logger.Information("Checking for existing environment variable configuration...");
-
-        // Create a temporary logger factory for ConfigurationService
-        var loggerFactory = new ConsoleLoggerFactory();
-        var configService = new ConfigurationService(loggerFactory.CreateLogger<ConfigurationService>());
-        var oldConfig = configService.LoadConfiguration();
-
-        if (!oldConfig.IsValid)
-        {
-            _logger.Debug("No valid environment variable configuration found");
-            return false;
-        }
-
-        _logger.Information("Found existing configuration. Migrating to secure storage...");
-
-        // Create new model from old config
-        var model = new ModelConfiguration
-        {
-            Name = $"{oldConfig.ProviderType}-{oldConfig.Model}".ToLower(),
-            ProviderType = oldConfig.ProviderType ?? "",
-            Url = oldConfig.BaseUrl ?? "",
-            ModelId = oldConfig.Model ?? "",
-            ApiKey = oldConfig.ApiKey ?? "",
-            RequiresAuth = oldConfig.RequiresAuth,
-            UseLegacyMaxTokens = oldConfig.OpenAiUseLegacyMaxTokens,
-            Temperature = oldConfig.Temperature,
-            MaxOutputTokens = oldConfig.MaxOutputTokens,
-            IsDefault = true,
-            Note = "Migrated from environment variables"
-        };
-
-        var settings = await LoadSettingsAsync();
-        
-        // Check if already migrated
-        if (settings.Models.Any(m => m.Note?.Contains("Migrated from environment variables") == true))
-        {
-            _logger.Debug("Configuration already migrated");
-            return false;
-        }
-        
-        settings.Models.Add(model);
-        settings.DefaultModelId = model.Id;
-        await SaveSettingsAsync(settings);
-
-        _logger.Success($"{Constants.UI.CheckMark} Migrated configuration to secure storage as model '{model.Name}'");
-        return true;
-    }
 
     /// <summary>
     ///     Validates that all aliases are unique across all models.
@@ -413,6 +404,118 @@ public class SecureConfigurationService : ISecureConfigurationService
         
         await UpdateModelAsync(model);
         _logger.Success($"{Constants.UI.CheckMark} Removed alias '{alias}' from model '{model.Name}'");
+    }
+
+    /// <inheritdoc />
+    public async Task<List<ModelConfiguration>> GetModelsByPartialMatchAsync(string partial)
+    {
+        if (string.IsNullOrWhiteSpace(partial))
+            return new List<ModelConfiguration>();
+        
+        var settings = await LoadSettingsAsync();
+        
+        // Check if partial matching is enabled and meets minimum length
+        if (!settings.Settings.EnablePartialAliasMatching || 
+            partial.Length < settings.Settings.MinimumAliasMatchLength)
+        {
+            return new List<ModelConfiguration>();
+        }
+        
+        // Find models where name or any alias starts with the partial string (case-insensitive)
+        var matches = settings.Models.Where(m =>
+            m.Name.StartsWith(partial, StringComparison.OrdinalIgnoreCase) ||
+            (m.Aliases != null && m.Aliases.Any(alias => 
+                alias.StartsWith(partial, StringComparison.OrdinalIgnoreCase)))
+        ).ToList();
+        
+        return matches;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> HealDefaultModelAsync(IConsoleLogger logger)
+    {
+        var settings = await LoadSettingsAsync();
+        
+        // If no models exist, we can't heal anything
+        if (settings.Models.Count == 0)
+        {
+            logger.Debug("No models exist, cannot heal default model");
+            return false;
+        }
+        
+        // Check if default model is missing or invalid
+        bool needsHealing = false;
+        string? healingReason = null;
+        
+        if (string.IsNullOrEmpty(settings.DefaultModelId))
+        {
+            needsHealing = true;
+            healingReason = "There is currently no default model set.";
+        }
+        else if (!settings.Models.Any(m => m.Id == settings.DefaultModelId))
+        {
+            needsHealing = true;
+            healingReason = $"The default model ID '{settings.DefaultModelId}' refers to a model that no longer exists.";
+        }
+        
+        if (!needsHealing)
+        {
+            logger.Debug("Default model configuration is valid");
+            return false;
+        }
+        
+        // If only one model exists, auto-set it as default
+        if (settings.Models.Count == 1)
+        {
+            var singleModel = settings.Models[0];
+            logger.Information($"{Constants.UI.WarningSymbol} {healingReason}");
+            logger.Information($"Setting '{singleModel.Name}' as the default model (only model available).");
+            
+            settings.DefaultModelId = singleModel.Id;
+            await SaveSettingsAsync(settings);
+            logger.Success($"{Constants.UI.CheckMark} Default model set to '{singleModel.Name}'");
+            return true;
+        }
+        
+        // Multiple models exist, prompt user to select
+        logger.Information($"{Constants.UI.WarningSymbol} {healingReason}");
+        logger.Information("Which model do you want to use as the default?");
+        logger.Information("");
+        
+        // Display models with numbers
+        for (int i = 0; i < settings.Models.Count; i++)
+        {
+            var model = settings.Models[i];
+            var aliasText = model.Aliases?.Count > 0 
+                ? $" (aliases: {string.Join(", ", model.Aliases.Select(a => $"@{a}"))})" 
+                : "";
+            logger.Information($"  [{i + 1}] {model.Name}{aliasText}");
+            if (!string.IsNullOrEmpty(model.Note))
+            {
+                logger.Information($"      {model.Note}");
+            }
+        }
+        
+        logger.Information("");
+        
+        // Get user choice
+        while (true)
+        {
+            Console.Write("Enter choice (1-" + settings.Models.Count + "): ");
+            var input = Console.ReadLine()?.Trim();
+            
+            if (int.TryParse(input, out var choice) && choice >= 1 && choice <= settings.Models.Count)
+            {
+                var selectedModel = settings.Models[choice - 1];
+                settings.DefaultModelId = selectedModel.Id;
+                await SaveSettingsAsync(settings);
+                
+                logger.Success($"{Constants.UI.CheckMark} Default model set to '{selectedModel.Name}'");
+                return true;
+            }
+            
+            logger.Error("Invalid choice. Please enter a number between 1 and " + settings.Models.Count);
+        }
     }
 
     /// <summary>

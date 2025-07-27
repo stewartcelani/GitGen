@@ -34,19 +34,24 @@ public class ProviderFactory
     /// <exception cref="NotSupportedException">Thrown when the provider type is not supported.</exception>
     public ICommitMessageProvider CreateProvider(GitGenConfiguration config, ModelConfiguration? modelConfig = null)
     {
-        var providerType = config.ProviderType?.ToLowerInvariant();
+        var type = config.Type?.ToLowerInvariant();
 
-        return providerType switch
+        return type switch
         {
             "openai" => new OpenAIProvider(
                 _serviceProvider.GetRequiredService<HttpClientService>(),
                 _serviceProvider.GetRequiredService<ConsoleLoggerFactory>().CreateLogger<OpenAIProvider>(),
                 config,
-                _serviceProvider.GetService<IEnvironmentPersistenceService>(),
+                _serviceProvider.GetService<ILlmCallTracker>(),
+                modelConfig),
+            "openai-compatible" => new OpenAIProvider(
+                _serviceProvider.GetRequiredService<HttpClientService>(),
+                _serviceProvider.GetRequiredService<ConsoleLoggerFactory>().CreateLogger<OpenAIProvider>(),
+                config,
                 _serviceProvider.GetService<ILlmCallTracker>(),
                 modelConfig),
             _ => throw new NotSupportedException(
-                $"Provider type '{config.ProviderType}' is not supported. Supported providers: openai")
+                $"API type '{config.Type}' is not supported. Supported types: openai, openai-compatible")
         };
     }
 }

@@ -144,7 +144,7 @@ public class LlmCallTracker : ILlmCallTracker
         
         // Display the status line
         var statusLine = string.Join(" • ", statusParts);
-        _logger.Muted(statusLine);
+        _logger.Muted($"📊 {statusLine}");
         
         // In debug mode, show response preview
         if (result.Message.Length > 100)

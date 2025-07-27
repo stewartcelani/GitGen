@@ -45,4 +45,14 @@ public class AppSettings
     ///     Gets or sets the path to the configuration file (for informational purposes).
     /// </summary>
     public string ConfigPath { get; set; } = string.Empty;
+
+    /// <summary>
+    ///     Gets or sets whether to enable partial alias matching (e.g., @gr matches @grok-3-mini).
+    /// </summary>
+    public bool EnablePartialAliasMatching { get; set; } = true;
+
+    /// <summary>
+    ///     Gets or sets the minimum number of characters required for partial alias matching.
+    /// </summary>
+    public int MinimumAliasMatchLength { get; set; } = 2;
 }

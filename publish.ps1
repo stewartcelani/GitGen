@@ -28,7 +28,7 @@ if ($invalidParameters.Count -gt 0) {
     Write-Host ""
     Write-Host "💡 Usage examples:" -ForegroundColor Yellow
     Write-Host "   .\publish.ps1                        # Publish for all platforms" -ForegroundColor Gray
-    Write-Host "   .\publish.ps1 -CurrentOnly           # Publish for current platform only" -ForegroundColor Gray
+    Write-Host "   .\publish.ps1 -Current               # Publish for current platform only" -ForegroundColor Gray
     Write-Host "   .\publish.ps1 -OutputPath 'C:\temp'  # Publish to custom directory" -ForegroundColor Gray
     Write-Host ""
     exit 1
@@ -363,6 +363,6 @@ Write-Host ""
 
 Write-Host "💡 Usage Examples:" -ForegroundColor Yellow
 Write-Host "   Publish for all platforms: .\publish.ps1" -ForegroundColor Gray
-Write-Host "   Publish for current platform only: .\publish.ps1 -CurrentOnly" -ForegroundColor Gray
+Write-Host "   Publish for current platform only: .\publish.ps1 -Current" -ForegroundColor Gray
 
 exit $($successCount -eq $totalCount ? 0 : 1)
