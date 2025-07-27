@@ -1,3 +1,5 @@
+using GitGen.Services;
+
 namespace GitGen.Configuration;
 
 /// <summary>
@@ -91,6 +93,46 @@ public class ModelConfiguration
     ///     Gets or sets the pricing information for this model.
     /// </summary>
     public PricingInfo? Pricing { get; set; }
+
+    /// <summary>
+    ///     Validates that the configuration has all necessary values and passes comprehensive validation.
+    /// </summary>
+    public bool IsValid =>
+        ValidationService.Provider.IsValid(Type) &&
+        ValidationService.Url.IsValid(Url) &&
+        ValidationService.Model.IsValid(ModelId) &&
+        ValidationService.ApiKey.IsValid(ApiKey, RequiresAuth) &&
+        ValidationService.Temperature.IsValid(Temperature) &&
+        ValidationService.TokenCount.IsValid(MaxOutputTokens);
+
+    /// <summary>
+    ///     Gets a detailed validation report for debugging purposes.
+    /// </summary>
+    /// <returns>A dictionary of field names and their validation errors.</returns>
+    public Dictionary<string, string> GetValidationErrors()
+    {
+        var errors = new Dictionary<string, string>();
+
+        if (!ValidationService.Provider.IsValid(Type))
+            errors["Type"] = ValidationService.Provider.GetValidationError(Type);
+
+        if (!ValidationService.Url.IsValid(Url))
+            errors["Url"] = ValidationService.Url.GetValidationError(Url);
+
+        if (!ValidationService.Model.IsValid(ModelId))
+            errors["ModelId"] = ValidationService.Model.GetValidationError(ModelId);
+
+        if (!ValidationService.ApiKey.IsValid(ApiKey, RequiresAuth))
+            errors["ApiKey"] = ValidationService.ApiKey.GetValidationError(ApiKey, RequiresAuth);
+
+        if (!ValidationService.Temperature.IsValid(Temperature))
+            errors["Temperature"] = ValidationService.Temperature.GetValidationError(Temperature);
+
+        if (!ValidationService.TokenCount.IsValid(MaxOutputTokens))
+            errors["MaxOutputTokens"] = ValidationService.TokenCount.GetValidationError(MaxOutputTokens);
+
+        return errors;
+    }
 }
 
 /// <summary>

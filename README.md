@@ -27,6 +27,110 @@ GitGen analyzes your Git repository changes and uses AI to generate meaningful, 
 - 📦 No external runtime dependencies
 - 🐛 Debug logging and comprehensive health checks
 
+## Architecture
+
+GitGen follows a clean, service-oriented architecture with dependency injection and clear separation of concerns. The application is designed to be extensible, secure, and maintainable.
+
+```mermaid
+graph TB
+    subgraph "User Interface Layer"
+        CLI[Command Line Interface<br/>System.CommandLine]
+        Config[gitgen config]
+        Main[gitgen @model prompt]
+    end
+
+    subgraph "Application Core"
+        Program[Program.cs<br/>DI Container & Orchestration]
+        CMG[CommitMessageGenerator<br/>Orchestrates generation flow]
+        GAS[GitAnalysisService<br/>Git operations & diff analysis]
+        CS[ConfigurationService<br/>Config management]
+        CMS[ConfigurationMenuService<br/>Interactive config UI]
+        CWS[ConfigurationWizardService<br/>Guided setup]
+    end
+
+    subgraph "AI Provider Layer"
+        PF[ProviderFactory<br/>Creates provider instances]
+        OAP[OpenAIProvider<br/>OpenAI-compatible APIs]
+        OAPD[OpenAIParameterDetector<br/>Self-healing parameters]
+        ICP[ICommitMessageProvider<br/>Provider interface]
+    end
+
+    subgraph "Infrastructure Services"
+        HCS[HttpClientService<br/>HTTP with Polly retry]
+        SCS[SecureConfigurationService<br/>Encrypted storage]
+        CL[ConsoleLogger<br/>Colored output]
+        VS[ValidationService<br/>Input validation]
+        MCS[MessageCleaningService<br/>Response sanitization]
+        CCS[CostCalculationService<br/>Token & cost tracking]
+    end
+
+    subgraph "External Dependencies"
+        Git[(Git Repository<br/>LibGit2Sharp)]
+        AI[AI APIs<br/>OpenAI/Anthropic/etc]
+        FS[(File System<br/>Encrypted config)]
+        CB[Clipboard<br/>TextCopy]
+    end
+
+    %% User interactions
+    CLI --> Config
+    CLI --> Main
+    Config --> Program
+    Main --> Program
+
+    %% Core flow
+    Program --> CMG
+    Program --> CS
+    CS --> SCS
+    CMG --> GAS
+    CMG --> PF
+    PF --> OAP
+    OAP -.-> ICP
+    OAP --> OAPD
+
+    %% Service interactions
+    CMG --> MCS
+    CMG --> CCS
+    OAP --> HCS
+    HCS --> AI
+    GAS --> Git
+    SCS --> FS
+    CMG --> CB
+    Program --> CMS
+    CMS --> CWS
+
+    %% Infrastructure usage
+    Program --> CL
+    Program --> VS
+    CS --> VS
+
+    %% Styling
+    classDef interface fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef service fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef external fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef provider fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    
+    class ICP interface
+    class CMG,GAS,CS,CMS,CWS,HCS,SCS,CL,VS,MCS,CCS service
+    class Git,AI,FS,CB external
+    class PF,OAP,OAPD provider
+```
+
+### Key Architectural Decisions
+
+1. **Service-Oriented Design**: Each service has a single responsibility, making the codebase easy to understand and test.
+
+2. **Dependency Injection**: All services are registered in `Program.cs` using Microsoft.Extensions.DependencyInjection, enabling loose coupling and testability.
+
+3. **Provider Pattern**: The `ProviderFactory` and `ICommitMessageProvider` interface allow easy addition of new AI providers without modifying existing code.
+
+4. **Secure Storage**: API keys are encrypted using Microsoft.AspNetCore.DataProtection, with platform-specific key storage locations.
+
+5. **Self-Healing Capabilities**: The `OpenAIParameterDetector` automatically adjusts to API variations (e.g., `max_tokens` vs `max_completion_tokens`).
+
+6. **Resilient HTTP Communication**: Polly integration provides automatic retry with exponential backoff for transient failures.
+
+7. **Clean Separation**: Business logic (services) is separated from infrastructure concerns (HTTP, storage) and external dependencies.
+
 ## Multi-Model Support & Aliases
 
 GitGen supports configuring multiple AI models and switching between them instantly using aliases. This allows you to:
@@ -44,13 +148,16 @@ When you run `gitgen config`, you can:
 
 ### Example Configuration Strategy
 
+> 💡 **Best Practice**: Configure your secure models first! The first model you add becomes the default.
+> This ensures `gitgen` without arguments uses a safe model for your private code.
+
 ```bash
-# Configure a premium model for work
+# Configure a premium model for work (FIRST - becomes default)
 Model name: claude-work
 Aliases: @claude, @work
 Note: For proprietary code - never use on public repos
 
-# Configure a free model for open source
+# Configure a free model for open source (add AFTER secure models)
 Model name: qwen-free  
 Aliases: @free, @public
 Note: For public repos where privacy isn't an issue
@@ -60,6 +167,59 @@ Model name: llama-local
 Aliases: @local, @private  
 Note: Runs locally - safe for any code
 ```
+
+## Security Best Practices
+
+### Default Model Selection
+
+⚠️ **Important**: Your default model is used when you run `gitgen` without specifying a model. Choose it carefully to avoid accidentally sending private code to public services.
+
+**DO:**
+- ✅ Set a secure, private model as your default (e.g., your work API or local model)
+- ✅ Use explicit model selection for public/free models: `gitgen @free`
+- ✅ Configure clear aliases that indicate the model's purpose (@work, @private, @public)
+
+**DON'T:**
+- ❌ Set a free/public model as your default
+- ❌ Rely on remembering which model is default - use descriptive names
+- ❌ Use the same model for both private and public repositories without explicit selection
+
+### Recommended Configuration Strategy
+
+1. **First Model**: Always configure a secure model first (it will become your default)
+2. **Free Models**: Add free models with clear aliases like @free or @public
+3. **Usage Pattern**: 
+   - Private repos: `gitgen` (uses secure default)
+   - Public repos: `gitgen @free` (explicitly choose free model)
+
+### Example Secure Setup
+
+```bash
+# 1. First, add your secure work model (becomes default)
+gitgen config
+> Model name: gpt-work
+> Aliases: @work, @private
+> Note: Company API - use for all proprietary code
+
+# 2. Then add free alternatives for open source
+gitgen config  
+> Model name: qwen-free
+> Aliases: @free, @public
+> Note: Free model - ONLY for public repositories
+
+# 3. Check your configuration
+gitgen config
+> 2. Manage models
+> 1. List models
+# Verify your secure model has the ⭐ (default) marker
+```
+
+### Additional Security Tips
+
+- Review your default model regularly: `gitgen config` → "Manage models" → "List models"
+- Use descriptive notes for each model to remind yourself of appropriate usage
+- Consider using local models (Ollama, LM Studio) for maximum privacy
+- Enable debug mode (`gitgen -d`) to see exactly which model is being used
 
 ## Quick Start
 
@@ -395,6 +555,10 @@ Estimated cost: $0.02 USD
 ```
 
 #### Example: Free Model via OpenRouter
+
+> ⚠️ **Security Note**: This example shows how to configure a free model for public repositories. 
+> Never set a free model as your default! Always use explicit model selection (`gitgen @free`) 
+> when using free models to avoid accidentally sending private code to public services.
 
 ##### Configuration for Cost-Conscious Usage
 

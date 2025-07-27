@@ -108,6 +108,9 @@ _ReSharper*/
 *.[Rr]e[Ss]harper
 *.DotSettings.user
 
+# Claude Code instructions (keep locally but not in source control)
+CLAUDE.md
+
 # JustCode is a .NET coding add-in
 .JustCode
 

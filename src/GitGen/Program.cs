@@ -129,11 +129,14 @@ internal class Program
         debugOption.AddAlias("--debug");
         var versionShortOption = new Option<bool>("-v", "Show version information");
         var versionLongOption = new Option<bool>("--version", "Show version information");
+        var previewOption = new Option<bool>("-p", "Preview mode - show what would happen without calling LLM.");
+        previewOption.AddAlias("--preview");
         var rootCommand = new RootCommand("GitGen - AI-Powered Git Commit Message Generator")
         {
             debugOption,
             versionShortOption,
-            versionLongOption
+            versionLongOption,
+            previewOption
         };
 
         // Add hidden option to carry the model name from @alias syntax
@@ -155,6 +158,7 @@ internal class Program
             var debug = invocationContext.ParseResult.GetValueForOption(debugOption);
             var showVersionShort = invocationContext.ParseResult.GetValueForOption(versionShortOption);
             var showVersionLong = invocationContext.ParseResult.GetValueForOption(versionLongOption);
+            var preview = invocationContext.ParseResult.GetValueForOption(previewOption);
             
             // Read the model name from our hidden option and the prompt from the argument
             var modelName = invocationContext.ParseResult.GetValueForOption(modelOption);
@@ -175,20 +179,29 @@ internal class Program
             var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
             var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
             var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = await configService.LoadConfigurationAsync(modelName);
+            
+            // Track if a specific model was requested
+            bool specificModelRequested = !string.IsNullOrEmpty(modelName);
+            
+            // Load configuration
+            var activeModel = await configService.LoadConfigurationAsync(modelName);
 
-            // If a specific model was requested but not found, show available models
-            if (config == null && !string.IsNullOrEmpty(modelName))
+            // If a specific model was requested but not found, show available models and EXIT
+            if (activeModel == null && specificModelRequested)
             {
+                logger.Debug($"Specific model '{modelName}' was requested but not found");
                 await DisplayModelSuggestions(serviceProvider, logger, modelName);
                 invocationContext.ExitCode = 1;
-                return;
+                return;  // EXIT HERE - do not continue to default model or healing logic
             }
 
-            if (config == null || !config.IsValid)
+            // Only proceed with healing/wizard if NO specific model was requested
+            if (activeModel == null)
             {
+                
                 // Check if we have models but just need to fix the default
-                if (secureConfig != null && await configService.NeedsDefaultModelHealingAsync())
+                // IMPORTANT: Only heal if NO specific model was requested
+                if (!specificModelRequested && secureConfig != null && await configService.NeedsDefaultModelHealingAsync())
                 {
                     logger.Debug("Default model configuration needs healing");
                     
@@ -197,8 +210,9 @@ internal class Program
                     if (healed)
                     {
                         // Try loading configuration again after healing
-                        config = await configService.LoadConfigurationAsync(modelName);
-                        if (config != null && config.IsValid)
+                        // Since no specific model was requested, load the default
+                        activeModel = await configService.LoadConfigurationAsync(null);
+                        if (activeModel != null)
                         {
                             Console.WriteLine();
                             // Successfully healed, continue with generation
@@ -235,18 +249,22 @@ internal class Program
                     }
 
                     // Use the configuration returned from the wizard directly
-                    config = wizardConfig;
+                    activeModel = wizardConfig;
 
                     logger.Success($"{Constants.UI.CheckMark} {Constants.Messages.ConfigurationSaved}");
                     Console.WriteLine();
                 }
             }
 
-            // Get the active model for cost calculation
-            var activeModel = await configService.GetActiveModelAsync();
-
-            // Main generation logic
-            await GenerateCommitMessage(serviceProvider, logger, config, customInstruction, activeModel);
+            // Main generation logic - check for preview mode
+            if (preview)
+            {
+                await ShowPreviewInfo(serviceProvider, logger, activeModel, customInstruction);
+            }
+            else
+            {
+                await GenerateCommitMessage(serviceProvider, logger, activeModel, customInstruction);
+            }
         });
 
         // Define 'config' command
@@ -282,6 +300,7 @@ internal class Program
             Console.WriteLine("  gitgen \"must be a haiku\"");
             Console.WriteLine("  gitgen @fast                 # Use your fast model");
             Console.WriteLine("  gitgen @free                 # Use free model for public repos");
+            Console.WriteLine("  gitgen -p @fast              # Preview model selection and cost");
             Console.WriteLine("  gitgen \"focus on security\" @ultrathink");
             Console.WriteLine("  gitgen @sonnet \"explain the refactoring\"");
             Console.WriteLine();
@@ -290,6 +309,7 @@ internal class Program
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  -d, --debug            Enable debug logging");
+            Console.WriteLine("  -p, --preview          Preview mode - show what would happen without calling LLM");
             Console.WriteLine("  -v, --version          Show version information");
             Console.WriteLine("  -?, -h, --help         Show help and usage information");
             Console.WriteLine();
@@ -304,10 +324,92 @@ internal class Program
         return rootCommand;
     }
 
+    private static async Task ShowPreviewInfo(IServiceProvider sp, IConsoleLogger logger,
+        ModelConfiguration? activeModel,
+        string? customInstruction)
+    {
+        try
+        {
+            var gitService = sp.GetRequiredService<GitAnalysisService>();
+            if (!gitService.IsGitRepository())
+            {
+                logger.Error($"{Constants.UI.CrossMark} {Constants.Messages.NoGitRepository}");
+                return;
+            }
+
+            var diff = gitService.GetRepositoryDiff();
+            if (string.IsNullOrWhiteSpace(diff))
+            {
+                logger.Information($"{Constants.UI.InfoSymbol} {Constants.Messages.NoUncommittedChanges}");
+                return;
+            }
+
+            // Show preview header
+            logger.Information("[PREVIEW MODE - No LLM call will be made]");
+            Console.WriteLine();
+
+            // Show model info
+            logger.Information($"{Constants.UI.LinkSymbol} Would use: {activeModel!.Name} ({activeModel.ModelId} via {activeModel.Provider})");
+
+            // Calculate and show diff stats
+            var diffLines = diff.Split('\n').Length;
+            var diffChars = diff.Length;
+            logger.Information($"{Constants.UI.BulbSymbol} Git diff: {diffLines:N0} lines, {diffChars:N0} characters");
+
+            // Estimate tokens
+            var systemPromptSize = EstimateSystemPromptSize(activeModel, customInstruction);
+            var diffTokens = EstimateTokens(diff);
+            var totalTokens = systemPromptSize + diffTokens;
+
+            logger.Information($"{Constants.UI.ChartSymbol} Estimated tokens:");
+            logger.Information($"   • System prompt: ~{systemPromptSize:N0} tokens");
+            logger.Information($"   • Git diff: ~{diffTokens:N0} tokens");
+            logger.Information($"   • Total input: ~{totalTokens:N0} tokens");
+            
+            // Estimate output tokens as midpoint of max output tokens
+            var maxOutputTokens = activeModel!.MaxOutputTokens;
+            var estimatedOutputTokens = maxOutputTokens / 2;
+            logger.Information($"   • Estimated output: ~{estimatedOutputTokens:N0} tokens (midpoint of {maxOutputTokens:N0} max)");
+
+            // Show estimated cost if pricing available
+            if (activeModel?.Pricing != null)
+            {
+                var inputCost = (totalTokens / 1_000_000.0) * (double)activeModel.Pricing.InputPer1M;
+                var outputCost = (estimatedOutputTokens / 1_000_000.0) * (double)activeModel.Pricing.OutputPer1M;
+                var totalCost = inputCost + outputCost;
+                
+                // Use CostCalculationService to format with proper currency
+                var inputCostStr = CostCalculationService.FormatCurrency((decimal)inputCost, activeModel.Pricing.CurrencyCode, 4);
+                var outputCostStr = CostCalculationService.FormatCurrency((decimal)outputCost, activeModel.Pricing.CurrencyCode, 4);
+                var totalCostStr = CostCalculationService.FormatCurrency((decimal)totalCost, activeModel.Pricing.CurrencyCode, 4);
+                
+                logger.Information($"💰 Estimated cost:");
+                logger.Information($"   • Input: ~{inputCostStr}");
+                logger.Information($"   • Output: ~{outputCostStr}");
+                logger.Information($"   • Total: ~{totalCostStr}");
+            }
+
+            // Show custom instruction if provided
+            if (!string.IsNullOrWhiteSpace(customInstruction))
+            {
+                Console.WriteLine();
+                logger.Information($"{Constants.UI.InfoSymbol} Custom instruction: \"{customInstruction}\"");
+            }
+
+            // Show how to run for real
+            Console.WriteLine();
+            logger.Muted("To generate actual commit message, run without -p flag");
+        }
+        catch (Exception ex)
+        {
+            logger.Error(ex, "Preview failed");
+            logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.UnexpectedError}", ex.Message);
+        }
+    }
+
     private static async Task GenerateCommitMessage(IServiceProvider sp, IConsoleLogger logger,
-        GitGenConfiguration config,
-        string? instruction,
-        ModelConfiguration? activeModel = null)
+        ModelConfiguration? activeModel,
+        string? instruction)
     {
         try
         {
@@ -329,7 +431,7 @@ internal class Program
             Console.WriteLine();
 
             var generator = sp.GetRequiredService<CommitMessageGenerator>();
-            var result = await generator.GenerateAsync(config, diff, instruction, activeModel);
+            var result = await generator.GenerateAsync(activeModel!, diff, instruction);
 
             logger.Success($"{Constants.UI.CheckMark} Generated Commit Message:");
 
@@ -387,29 +489,6 @@ internal class Program
         }
     }
 
-    private static async Task<bool> TestLLMConnection(IServiceProvider sp, IConsoleLogger logger, GitGenConfiguration config, ModelConfiguration? activeModel = null, string indent = "")
-    {
-        try
-        {
-            logger.Information($"{indent}{Constants.UI.TestTubeSymbol} {Constants.Messages.TestingConnection}");
-
-            var providerFactory = sp.GetRequiredService<ProviderFactory>();
-            var provider = providerFactory.CreateProvider(config, activeModel);
-
-            logger.Information(
-                $"{indent}{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {config.BaseUrl} ({config.Model ?? Constants.Fallbacks.UnknownModelName})");
-
-            var result = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
-
-            logger.Success($"{indent}{Constants.UI.CheckMark} LLM Response: \"{result.Message}\"");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            logger.Error($"{indent}{Constants.UI.CrossMark} Test failed: {ex.Message}");
-            return false;
-        }
-    }
 
 
     private static void DisplayModelInfo(IConsoleLogger logger, ModelConfiguration model)
@@ -532,5 +611,46 @@ internal class Program
         logger.Information("  gitgen @modelname");
         logger.Information("  gitgen \"your prompt\" @modelname");
         logger.Information("  gitgen @modelname \"your prompt\"");
+    }
+
+    /// <summary>
+    ///     Estimates the number of tokens in a text string using a very rough approximation.
+    ///     This uses a simple 4 characters per token ratio which is reasonable for English text and code.
+    ///     Actual token counts will vary significantly based on content and tokenizer used by each model.
+    /// </summary>
+    /// <param name="text">The text to estimate tokens for.</param>
+    /// <returns>Rough estimate of token count.</returns>
+    private static int EstimateTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        // Rough estimate: ~4 characters per token
+        return text.Length / 4;
+    }
+
+    /// <summary>
+    ///     Estimates the size of the system prompt in tokens.
+    ///     This is a rough approximation based on the base prompt template plus any custom instructions.
+    /// </summary>
+    /// <param name="model">The model configuration which may contain a custom system prompt.</param>
+    /// <param name="customInstruction">Optional custom instruction from the user.</param>
+    /// <returns>Rough estimate of system prompt token count.</returns>
+    private static int EstimateSystemPromptSize(ModelConfiguration model, string? customInstruction)
+    {
+        // Base prompt is approximately 1600 characters
+        var basePromptSize = 1600;
+        
+        // Add custom instruction if provided
+        if (!string.IsNullOrWhiteSpace(customInstruction))
+        {
+            basePromptSize += customInstruction.Length;
+        }
+        
+        // Add model's custom system prompt if configured
+        if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+        {
+            basePromptSize += model.SystemPrompt.Length;
+        }
+        
+        return EstimateTokens(new string('x', basePromptSize));
     }
 }

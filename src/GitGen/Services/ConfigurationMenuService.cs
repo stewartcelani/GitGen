@@ -44,28 +44,28 @@ public class ConfigurationMenuService
             Console.Clear();
             await DisplayMainMenu();
             
-            var choice = Console.ReadKey(true).KeyChar;
-            Console.WriteLine();
+            var choice = Console.ReadLine()?.Trim();
             
             switch (choice)
             {
-                case '1':
+                case "1":
                     await AddNewModel();
                     break;
-                case '2':
+                case "2":
                     await ManageModels();
                     break;
-                case '3':
+                case "3":
                     await TestModels();
                     break;
-                case '4':
+                case "4":
                     await ConfigureAppSettings();
                     break;
-                case '5':
+                case "5":
                     await ResetConfiguration();
                     break;
-                case '0':
-                case (char)27: // ESC key
+                case "0":
+                case "":
+                case null:
                     return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
@@ -103,11 +103,7 @@ public class ConfigurationMenuService
         Console.WriteLine();
         
         var model = await _wizardService.RunMultiModelWizardAsync();
-        if (model != null)
-        {
-            _logger.Success($"{Constants.UI.CheckMark} Model '{model.Name}' added successfully!");
-        }
-        else
+        if (model == null)
         {
             _logger.Warning("Model configuration cancelled.");
         }
@@ -124,25 +120,25 @@ public class ConfigurationMenuService
             Console.Clear();
             await DisplayModelManagementMenu();
             
-            var choice = Console.ReadKey(true).KeyChar;
-            Console.WriteLine();
+            var choice = Console.ReadLine()?.Trim();
             
             switch (choice)
             {
-                case '1':
+                case "1":
                     await ListModels();
                     break;
-                case '2':
+                case "2":
                     await SetDefaultModel();
                     break;
-                case '3':
+                case "3":
                     await EditModel();
                     break;
-                case '4':
+                case "4":
                     await DeleteModel();
                     break;
-                case '0':
-                case (char)27: // ESC key
+                case "0":
+                case "":
+                case null:
                     return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
@@ -183,13 +179,15 @@ public class ConfigurationMenuService
         }
         else
         {
-            foreach (var model in settings.Models.OrderBy(m => m.Name))
+            foreach (var model in settings.Models.OrderByDescending(m => m.LastUsed))
             {
                 var defaultMarker = model.Id == settings.DefaultModelId ? " ⭐ (default)" : "";
                 var lastUsed = DateTimeHelper.ToLocalDateTimeString(model.LastUsed);
                 
                 _logger.Information($"  {model.Name}{defaultMarker}");
                 _logger.Muted($"    Type: {model.Type} | Provider: {model.Provider} | Model: {model.ModelId}");
+                _logger.Muted($"    URL: {model.Url}");
+                _logger.Muted($"    Temperature: {model.Temperature} | Max Output Tokens: {model.MaxOutputTokens:N0}");
                 
                 if (!string.IsNullOrWhiteSpace(model.Note))
                     _logger.Muted($"    Note: {model.Note}");
@@ -246,6 +244,26 @@ public class ConfigurationMenuService
             selection > 0 && selection <= settings.Models.Count)
         {
             var selectedModel = settings.Models[selection - 1];
+            
+            // Check if this appears to be a public/free model
+            if (AppearsToBePublicModel(selectedModel))
+            {
+                Console.WriteLine();
+                _logger.Warning($"{Constants.UI.WarningSymbol} Warning: This model appears to be configured for public/free use.");
+                _logger.Warning("   Setting it as default means running 'gitgen' without specifying a model");
+                _logger.Warning("   will send your code to this service.");
+                Console.WriteLine();
+                Console.Write("Are you sure you want to set this as the default model? (y/N): ");
+                var confirm = Console.ReadLine()?.Trim().ToLower();
+                
+                if (confirm != "y" && confirm != "yes")
+                {
+                    _logger.Information("Default model change cancelled.");
+                    await Task.Delay(1500);
+                    return;
+                }
+            }
+            
             try
             {
                 await _secureConfig.SetDefaultModelAsync(selectedModel.Name);
@@ -298,7 +316,31 @@ public class ConfigurationMenuService
         while (true)
         {
             Console.Clear();
-            _logger.Information($"═══ Edit Model: {model.Name} ═══");
+            
+            // Load settings to check if this is the default model
+            var settings = await _secureConfig.LoadSettingsAsync();
+            var defaultMarker = model.Id == settings.DefaultModelId ? " ⭐ (default)" : "";
+            
+            _logger.Information($"═══ Edit Model: {model.Name}{defaultMarker} ═══");
+            Console.WriteLine();
+            
+            // Display model details (same as in ListModels)
+            _logger.Muted($"    Type: {model.Type} | Provider: {model.Provider} | Model: {model.ModelId}");
+            _logger.Muted($"    URL: {model.Url}");
+            _logger.Muted($"    Temperature: {model.Temperature} | Max Output Tokens: {model.MaxOutputTokens:N0}");
+            
+            if (!string.IsNullOrWhiteSpace(model.Note))
+                _logger.Muted($"    Note: {model.Note}");
+            
+            if (model.Aliases != null && model.Aliases.Count > 0)
+            {
+                var aliasesStr = string.Join(", ", model.Aliases.OrderBy(a => a).Select(a => $"@{a}"));
+                _logger.Muted($"    Aliases: {aliasesStr}");
+            }
+            
+            var lastUsed = DateTimeHelper.ToLocalDateTimeString(model.LastUsed);
+            _logger.Muted($"    Last used: {lastUsed}");
+            
             Console.WriteLine();
             
             _logger.Information("1. Manage aliases");
@@ -310,25 +352,25 @@ public class ConfigurationMenuService
             Console.WriteLine();
             Console.Write("Select option: ");
             
-            var choice = Console.ReadKey(true).KeyChar;
-            Console.WriteLine();
+            var choice = Console.ReadLine()?.Trim();
             
             switch (choice)
             {
-                case '1':
+                case "1":
                     await ManageAliases(model);
                     break;
-                case '2':
+                case "2":
                     await ChangeMaxTokens(model);
                     break;
-                case '3':
+                case "3":
                     await UpdateNote(model);
                     break;
-                case '4':
+                case "4":
                     await TestSingleModelFromMenu(model);
                     break;
-                case '0':
-                case (char)27: // ESC key
+                case "0":
+                case "":
+                case null:
                     return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
@@ -365,12 +407,11 @@ public class ConfigurationMenuService
         Console.WriteLine();
         Console.Write("Select option: ");
         
-        var choice = Console.ReadKey(true).KeyChar;
-        Console.WriteLine();
+        var choice = Console.ReadLine()?.Trim();
         
         switch (choice)
         {
-            case '1':
+            case "1":
                 Console.Write("Enter new alias (without @): ");
                 var newAlias = Console.ReadLine()?.Trim();
                 if (!string.IsNullOrEmpty(newAlias))
@@ -387,7 +428,7 @@ public class ConfigurationMenuService
                 }
                 break;
                 
-            case '2':
+            case "2":
                 if (model.Aliases == null || model.Aliases.Count == 0)
                 {
                     _logger.Warning("No aliases to remove.");
@@ -538,19 +579,19 @@ public class ConfigurationMenuService
         Console.WriteLine();
         Console.Write("Select option: ");
         
-        var choice = Console.ReadKey(true).KeyChar;
-        Console.WriteLine();
+        var choice = Console.ReadLine()?.Trim();
         
         switch (choice)
         {
-            case '1':
+            case "1":
                 await TestAllModels(settings);
                 break;
-            case '2':
+            case "2":
                 await TestSpecificModel(settings);
                 break;
-            case '0':
-            case (char)27: // ESC key
+            case "0":
+            case "":
+            case null:
                 return;
             default:
                 _logger.Warning("Invalid choice. Please try again.");
@@ -606,25 +647,25 @@ public class ConfigurationMenuService
             Console.Clear();
             await DisplayAppSettingsMenu();
             
-            var choice = Console.ReadKey(true).KeyChar;
-            Console.WriteLine();
+            var choice = Console.ReadLine()?.Trim();
             
             switch (choice)
             {
-                case '1':
+                case "1":
                     await ToggleShowTokenUsage();
                     break;
-                case '2':
+                case "2":
                     await ToggleCopyToClipboard();
                     break;
-                case '3':
+                case "3":
                     await TogglePartialAliasMatching();
                     break;
-                case '4':
+                case "4":
                     await SetMinimumAliasMatchLength();
                     break;
-                case '0':
-                case (char)27: // ESC key
+                case "0":
+                case "":
+                case null:
                     return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
@@ -815,22 +856,15 @@ public class ConfigurationMenuService
         var defaultMarker = model.Id == (await _secureConfig.LoadSettingsAsync()).DefaultModelId ? " ⭐" : "";
         _logger.Information($"{indent}Testing: {model.Name}{defaultMarker}");
         _logger.Muted($"{indent}  Type: {model.Type} | Provider: {model.Provider} | Model: {model.ModelId}");
+        _logger.Muted($"{indent}  URL: {model.Url}");
+        _logger.Muted($"{indent}  Temperature: {model.Temperature} | Max Output Tokens: {model.MaxOutputTokens:N0}");
         
         try
         {
-            // Load configuration for this specific model
-            var config = await _configService.LoadConfigurationAsync(model.Name);
-            
-            if (config == null || !config.IsValid)
-            {
-                _logger.Error($"{indent}  {Constants.UI.CrossMark} Invalid configuration");
-                return false;
-            }
-            
             // Test the connection
             try
             {
-                var provider = _providerFactory.CreateProvider(config, model);
+                var provider = _providerFactory.CreateProvider(model);
                 _logger.Information($"{indent}  {Constants.UI.TestTubeSymbol} Testing connection...");
                 
                 var result = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
@@ -848,5 +882,48 @@ public class ConfigurationMenuService
             _logger.Error($"{indent}  {Constants.UI.CrossMark} Error: {ex.Message}");
             return false;
         }
+    }
+    
+    /// <summary>
+    ///     Checks if a model appears to be configured for public/free use based on its aliases and description.
+    /// </summary>
+    private bool AppearsToBePublicModel(ModelConfiguration model)
+    {
+        // Keywords that suggest public/free usage
+        string[] publicKeywords = { "free", "public", "open" };
+        
+        // Check aliases
+        if (model.Aliases != null)
+        {
+            foreach (var alias in model.Aliases)
+            {
+                if (publicKeywords.Any(keyword => alias.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+        }
+        
+        // Check note/description
+        if (!string.IsNullOrWhiteSpace(model.Note))
+        {
+            if (publicKeywords.Any(keyword => model.Note.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        
+        // Check if it's a known free provider endpoint
+        if (!string.IsNullOrWhiteSpace(model.Url))
+        {
+            // Check for common free model endpoints
+            if (model.Url.Contains("openrouter", StringComparison.OrdinalIgnoreCase) && 
+                model.ModelId != null && model.ModelId.Contains(":free", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        
+        // Check if pricing indicates it's free
+        if (model.Pricing != null && 
+            model.Pricing.InputPer1M == 0 && 
+            model.Pricing.OutputPer1M == 0)
+            return true;
+        
+        return false;
     }
 }

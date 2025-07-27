@@ -27,34 +27,24 @@ public class CommitMessageGenerator
     /// <summary>
     ///     Generates a commit message using the configured AI provider and cleans the output.
     /// </summary>
-    /// <param name="config">The GitGen configuration containing provider settings.</param>
+    /// <param name="modelConfig">The model configuration containing provider settings.</param>
     /// <param name="diff">The git diff content to be summarized into a commit message.</param>
     /// <param name="customInstruction">An optional custom instruction to guide the generation style.</param>
-    /// <param name="modelConfig">Optional model configuration for pricing and other metadata.</param>
     /// <returns>A <see cref="CommitMessageResult" /> containing the cleaned message and token usage statistics.</returns>
     /// <exception cref="ArgumentException">Thrown when the diff is null or empty.</exception>
     /// <exception cref="AuthenticationException">Thrown when authentication with the AI provider fails.</exception>
-    public async Task<CommitMessageResult> GenerateAsync(GitGenConfiguration config, string diff,
-        string? customInstruction = null, ModelConfiguration? modelConfig = null)
+    public async Task<CommitMessageResult> GenerateAsync(ModelConfiguration modelConfig, string diff,
+        string? customInstruction = null)
     {
         if (string.IsNullOrWhiteSpace(diff)) throw new ArgumentException("Diff cannot be null or empty", nameof(diff));
 
         try
         {
-            var provider = _providerFactory.CreateProvider(config, modelConfig);
+            var provider = _providerFactory.CreateProvider(modelConfig);
             
-            // Display model information in a cleaner format
-            if (modelConfig != null)
-            {
-                _logger.Information("🔗 Using {ModelName} ({ModelId} via {Provider} @ {Url})",
-                    modelConfig.Name, modelConfig.ModelId, modelConfig.Provider, modelConfig.Url);
-            }
-            else
-            {
-                // Fallback for when modelConfig is not available
-                _logger.Information("🔗 Using {Model} via {ProviderName} @ {BaseUrl}",
-                    config.Model ?? "unknown", provider.ProviderName, config.BaseUrl ?? "unknown");
-            }
+            // Display model information
+            _logger.Information("🔗 Using {ModelName} ({ModelId} via {Provider})",
+                modelConfig.Name, modelConfig.ModelId, modelConfig.Provider);
 
             if (!string.IsNullOrWhiteSpace(customInstruction))
                 _logger.Information("Applying custom instruction: {Instruction}", customInstruction);
@@ -91,7 +81,7 @@ public class CommitMessageGenerator
         catch (Exception ex)
         {
             _logger.Error(ex, "Failed to generate commit message using {Type}",
-                config.Type ?? "unknown");
+                modelConfig.Type ?? "unknown");
             throw;
         }
     }

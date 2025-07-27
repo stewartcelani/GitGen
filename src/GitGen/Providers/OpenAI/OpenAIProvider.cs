@@ -14,37 +14,35 @@ namespace GitGen.Providers.OpenAI;
 /// </summary>
 public class OpenAIProvider : ICommitMessageProvider
 {
-    private readonly GitGenConfiguration _config;
     private readonly HttpClientService _httpClient;
     private readonly IConsoleLogger _logger;
     private readonly OpenAIParameterDetector _parameterDetector;
     private readonly ILlmCallTracker? _callTracker;
-    private ModelConfiguration? _modelConfig;
+    private readonly ModelConfiguration _modelConfig;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="OpenAIProvider" /> class.
     /// </summary>
     /// <param name="httpClient">The service for making HTTP requests to the API.</param>
     /// <param name="logger">The console logger for debugging and error reporting.</param>
-    /// <param name="config">The GitGen configuration containing API settings.</param>
+    /// <param name="modelConfig">The model configuration containing API settings.</param>
+    /// <param name="callTracker">Optional call tracker for monitoring LLM usage.</param>
     public OpenAIProvider(
         HttpClientService httpClient,
         IConsoleLogger logger,
-        GitGenConfiguration config,
-        ILlmCallTracker? callTracker = null,
-        ModelConfiguration? modelConfig = null)
+        ModelConfiguration modelConfig,
+        ILlmCallTracker? callTracker = null)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _config = config;
-        _callTracker = callTracker;
         _modelConfig = modelConfig;
+        _callTracker = callTracker;
         _parameterDetector = new OpenAIParameterDetector(
             httpClient,
             logger,
-            config.BaseUrl!,
-            config.ApiKey,
-            config.RequiresAuth,
+            modelConfig.Url,
+            modelConfig.ApiKey,
+            modelConfig.RequiresAuth,
             callTracker,
             modelConfig);
     }
@@ -68,16 +66,16 @@ public class OpenAIProvider : ICommitMessageProvider
                 {
                     var request = new OpenAIRequest
                     {
-                        Model = _config.Model!,
+                        Model = _modelConfig.ModelId,
                         Messages = new[]
                         {
                             new Message { Role = "system", Content = systemPrompt },
                             new Message { Role = "user", Content = diff }
                         },
-                        Temperature = _config.Temperature
+                        Temperature = _modelConfig.Temperature
                     };
 
-                    var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
+                    var response = await SendRequestWithSelfHealingAsync(request, _modelConfig.MaxOutputTokens);
                     var responseContent = await response.Content.ReadAsStringAsync();
                     var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
 
@@ -110,16 +108,16 @@ public class OpenAIProvider : ICommitMessageProvider
         // Fallback to original implementation if no tracker
         var request = new OpenAIRequest
         {
-            Model = _config.Model!,
+            Model = _modelConfig.ModelId,
             Messages = new[]
             {
                 new Message { Role = "system", Content = systemPrompt },
                 new Message { Role = "user", Content = diff }
             },
-            Temperature = _config.Temperature
+            Temperature = _modelConfig.Temperature
         };
 
-        var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
+        var response = await SendRequestWithSelfHealingAsync(request, _modelConfig.MaxOutputTokens);
         var responseContent = await response.Content.ReadAsStringAsync();
         var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
 
@@ -160,15 +158,15 @@ public class OpenAIProvider : ICommitMessageProvider
                 {
                     var request = new OpenAIRequest
                     {
-                        Model = _config.Model!,
+                        Model = _modelConfig.ModelId,
                         Messages = new[]
                         {
                             new Message { Role = "user", Content = prompt }
                         },
-                        Temperature = _config.Temperature
+                        Temperature = _modelConfig.Temperature
                     };
 
-                    var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
+                    var response = await SendRequestWithSelfHealingAsync(request, _modelConfig.MaxOutputTokens);
                     var responseContent = await response.Content.ReadAsStringAsync();
                     var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
 
@@ -201,15 +199,15 @@ public class OpenAIProvider : ICommitMessageProvider
         // Fallback to original implementation if no tracker
         var request = new OpenAIRequest
         {
-            Model = _config.Model!,
+            Model = _modelConfig.ModelId,
             Messages = new[]
             {
                 new Message { Role = "user", Content = prompt }
             },
-            Temperature = _config.Temperature
+            Temperature = _modelConfig.Temperature
         };
 
-        var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
+        var response = await SendRequestWithSelfHealingAsync(request, _modelConfig.MaxOutputTokens);
         var responseContent = await response.Content.ReadAsStringAsync();
         var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
 
@@ -242,7 +240,7 @@ public class OpenAIProvider : ICommitMessageProvider
     {
         try
         {
-            var parameters = await _parameterDetector.DetectParametersAsync(_config.Model!);
+            var parameters = await _parameterDetector.DetectParametersAsync(_modelConfig.ModelId);
             return (true, parameters.UseLegacyMaxTokens, parameters.Temperature);
         }
         catch (HttpResponseException)
@@ -283,7 +281,7 @@ public class OpenAIProvider : ICommitMessageProvider
     private async Task<HttpResponseMessage> SendRequestWithSelfHealingAsync(OpenAIRequest request, int maxTokensValue)
     {
         // Set token parameter based on current configuration
-        if (_config.OpenAiUseLegacyMaxTokens)
+        if (_modelConfig.UseLegacyMaxTokens)
             request.MaxTokens = maxTokensValue;
         else
             request.MaxCompletionTokens = maxTokensValue;
@@ -309,13 +307,13 @@ public class OpenAIProvider : ICommitMessageProvider
 
         try
         {
-            var parameters = await _parameterDetector.DetectParametersAsync(_config.Model!);
+            var parameters = await _parameterDetector.DetectParametersAsync(_modelConfig.ModelId);
 
             _logger.Information("Successfully re-detected correct API parameters. Updating configuration...");
 
             // Update in-memory configuration only (no persistence)
-            _config.OpenAiUseLegacyMaxTokens = parameters.UseLegacyMaxTokens;
-            _config.Temperature = parameters.Temperature;
+            _modelConfig.UseLegacyMaxTokens = parameters.UseLegacyMaxTokens;
+            _modelConfig.Temperature = parameters.Temperature;
 
             // Update request for retry
             request.MaxTokens = parameters.UseLegacyMaxTokens ? maxTokensValue : null;
@@ -339,12 +337,12 @@ public class OpenAIProvider : ICommitMessageProvider
 
         try
         {
-            var parameters = await _parameterDetector.DetectParametersAsync(_config.Model!);
+            var parameters = await _parameterDetector.DetectParametersAsync(_modelConfig.ModelId);
 
             _logger.Information("Successfully re-detected correct temperature. Updating configuration...");
 
             // Update in-memory configuration only (no persistence) and request
-            _config.Temperature = parameters.Temperature;
+            _modelConfig.Temperature = parameters.Temperature;
             request.Temperature = parameters.Temperature;
 
             _logger.Information("Retrying the original request with corrected temperature...");
@@ -361,25 +359,25 @@ public class OpenAIProvider : ICommitMessageProvider
     private async Task<HttpResponseMessage> SendRequestAsync(OpenAIRequest requestPayload)
     {
         var jsonPayload = JsonSerializer.Serialize(requestPayload, OpenAIJsonContext.Default.OpenAIRequest);
-        _logger.Debug("Sending API request to {BaseUrl} with payload: {JsonPayload}", _config.BaseUrl ?? "unknown",
+        _logger.Debug("Sending API request to {BaseUrl} with payload: {JsonPayload}", _modelConfig.Url ?? "unknown",
             jsonPayload);
 
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, _config.BaseUrl)
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, _modelConfig.Url)
         {
             Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
         };
 
         // Only add authentication headers if the configuration requires it.
-        if (_config.RequiresAuth)
+        if (_modelConfig.RequiresAuth)
         {
-            if (string.IsNullOrEmpty(_config.ApiKey))
+            if (string.IsNullOrEmpty(_modelConfig.ApiKey))
                 throw new InvalidOperationException("API Key is missing for a provider that requires authentication.");
 
-            if (_config.BaseUrl!.Contains(Constants.Api.AzureUrlPattern))
-                httpRequest.Headers.Add(Constants.Api.AzureApiKeyHeader, _config.ApiKey);
+            if (_modelConfig.Url!.Contains(Constants.Api.AzureUrlPattern))
+                httpRequest.Headers.Add(Constants.Api.AzureApiKeyHeader, _modelConfig.ApiKey);
             else
                 httpRequest.Headers.Authorization =
-                    new AuthenticationHeaderValue(Constants.Api.BearerPrefix, _config.ApiKey);
+                    new AuthenticationHeaderValue(Constants.Api.BearerPrefix, _modelConfig.ApiKey);
         }
 
         try
@@ -423,9 +421,9 @@ public class OpenAIProvider : ICommitMessageProvider
 </prompt>";
 
         // Append model's custom system prompt if configured
-        if (!string.IsNullOrWhiteSpace(_config.SystemPrompt))
+        if (!string.IsNullOrWhiteSpace(_modelConfig.SystemPrompt))
         {
-            return $"{basePrompt}\n\n{_config.SystemPrompt}";
+            return $"{basePrompt}\n\n{_modelConfig.SystemPrompt}";
         }
 
         return basePrompt;

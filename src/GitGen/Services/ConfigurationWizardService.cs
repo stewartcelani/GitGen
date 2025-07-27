@@ -37,8 +37,8 @@ public class ConfigurationWizardService
     ///     Runs the interactive configuration wizard to set up or modify GitGen configuration.
     ///     Guides the user through provider selection, configuration, testing, and persistence.
     /// </summary>
-    /// <returns>The configured <see cref="GitGenConfiguration" /> if successful; otherwise, null if cancelled or failed.</returns>
-    public async Task<GitGenConfiguration?> RunWizardAsync()
+    /// <returns>The configured <see cref="ModelConfiguration" /> if successful; otherwise, null if cancelled or failed.</returns>
+    public async Task<ModelConfiguration?> RunWizardAsync()
     {
         // Always use the new multi-model wizard
         if (_secureConfigService == null)
@@ -47,149 +47,9 @@ public class ConfigurationWizardService
             return null;
         }
 
-        var model = await RunMultiModelWizardAsync();
-        if (model != null)
-        {
-            // Convert to GitGenConfiguration for backward compatibility
-            return new GitGenConfiguration
-            {
-                Type = model.Type,
-                Provider = model.Provider,
-                BaseUrl = model.Url,
-                Model = model.ModelId,
-                ApiKey = model.ApiKey,
-                RequiresAuth = model.RequiresAuth,
-                OpenAiUseLegacyMaxTokens = model.UseLegacyMaxTokens,
-                Temperature = model.Temperature,
-                MaxOutputTokens = model.MaxOutputTokens,
-                SystemPrompt = model.SystemPrompt
-            };
-        }
-        return null;
+        return await RunMultiModelWizardAsync();
     }
 
-
-    private bool SelectProviderConfiguration(GitGenConfiguration config, GitGenConfiguration existingConfig)
-    {
-        _logger.Information("");
-        _logger.Information("Step 2: Select your specific provider preset.");
-        _logger.Information("  1. OpenAI (Official Platform)");
-        _logger.Information(
-            "  2. Custom Provider (API Key required, e.g., Azure, Anthropic, Google, OpenRouter, Groq)");
-        _logger.Information("  3. Custom Provider (No API Key required, e.g., Ollama, LM Studio)");
-
-        // Determine default choice based on existing config
-        var defaultChoice = "1";
-        if (!string.IsNullOrEmpty(existingConfig.BaseUrl))
-        {
-            if (existingConfig.BaseUrl == Constants.Configuration.DefaultOpenAIBaseUrl)
-                defaultChoice = "1";
-            else if (existingConfig.RequiresAuth)
-                defaultChoice = "2";
-            else
-                defaultChoice = "3";
-        }
-
-        var choice = Prompt("Enter your choice:", defaultChoice);
-
-        switch (choice)
-        {
-            case "1": // OpenAI
-                config.BaseUrl = Constants.Configuration.DefaultOpenAIBaseUrl;
-                // Extract and suggest domain as provider name
-                var openaiDomain = ValidationService.DomainExtractor.ExtractDomain(config.BaseUrl) ?? "openai.com";
-                config.Provider = Prompt($"Provider name [{openaiDomain}]:", 
-                    existingConfig.Provider ?? openaiDomain);
-                config.Model = Prompt("Enter your model name:",
-                    existingConfig.Model ?? Constants.Configuration.DefaultOpenAIModel);
-                config.ApiKey = PromptForApiKey("Enter your OpenAI API Key:", existingConfig.ApiKey);
-                config.RequiresAuth = true;
-                break;
-            case "2": // Custom with Auth (covers Azure, etc.)
-                config.BaseUrl = Prompt("Enter the provider's chat completions URL (e.g., your Azure endpoint):",
-                    existingConfig.BaseUrl);
-                
-                // Check if URL matches a known provider
-                var knownProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(config.BaseUrl);
-                if (!string.IsNullOrEmpty(knownProvider))
-                {
-                    config.Provider = knownProvider;
-                    _logger.Information($"Provider name [{knownProvider}]: {knownProvider}");
-                }
-                else
-                {
-                    // Extract and suggest domain as provider name for unknown providers
-                    var customDomain = ValidationService.DomainExtractor.ExtractDomain(config.BaseUrl) ?? "custom";
-                    config.Provider = Prompt($"Provider name [{customDomain}]:", 
-                        existingConfig.Provider ?? customDomain);
-                }
-                
-                config.Model = Prompt("Enter the model name (e.g., your Azure deployment name):", existingConfig.Model);
-                config.ApiKey = PromptForApiKey("Enter the provider's API Key:", existingConfig.ApiKey);
-                config.RequiresAuth = true;
-                break;
-            case "3": // Local/No Auth
-                config.BaseUrl = Prompt("Enter your custom provider's chat completions URL:",
-                    existingConfig.BaseUrl ?? Constants.Configuration.DefaultLocalBaseUrl);
-                
-                // Check if URL matches a known provider
-                var knownLocalProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(config.BaseUrl);
-                if (!string.IsNullOrEmpty(knownLocalProvider))
-                {
-                    config.Provider = knownLocalProvider;
-                    _logger.Information($"Provider name [{knownLocalProvider}]: {knownLocalProvider}");
-                }
-                else
-                {
-                    // Extract and suggest domain as provider name for unknown providers
-                    var localDomain = ValidationService.DomainExtractor.ExtractDomain(config.BaseUrl) ?? "localhost";
-                    config.Provider = Prompt($"Provider name [{localDomain}]:", 
-                        existingConfig.Provider ?? localDomain);
-                }
-                
-                config.Model = Prompt("Enter the model name (e.g., llama3):", existingConfig.Model);
-                config.RequiresAuth = false;
-                config.ApiKey = Constants.Fallbacks.NotRequiredValue;
-                break;
-            default:
-                _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.InvalidChoice}");
-                return false;
-        }
-
-        return true;
-    }
-
-    private void ConfigureMaxOutputTokens(GitGenConfiguration config, GitGenConfiguration existingConfig)
-    {
-        _logger.Information("");
-        _logger.Information("Step 3: Configure maximum output tokens.");
-        _logger.Information("This controls how many tokens the AI model can generate in responses.");
-
-        // Use existing value as default, or smart default based on model
-        var currentDefault = existingConfig.MaxOutputTokens > 0
-            ? existingConfig.MaxOutputTokens
-            : GetSuggestedMaxOutputTokens(config.Model);
-
-        var modelType = GetModelTypeDescription(config.Model);
-
-        _logger.Information($"ℹ️ Current/Suggested: {currentDefault} tokens{modelType}");
-        _logger.Information("ℹ️ Range: 100-8000 tokens. Higher values needed for reasoning models to avoid cut-off.");
-
-        while (true)
-        {
-            var input = Prompt("Enter max output tokens:", currentDefault.ToString());
-
-            if (int.TryParse(input, out var maxTokens) && ValidationService.TokenCount.IsValid(maxTokens))
-            {
-                config.MaxOutputTokens = maxTokens;
-                break;
-            }
-
-            _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.ErrorMessages.InvalidTokenRange}",
-                Constants.Configuration.MinOutputTokens,
-                Constants.Configuration.MaxOutputTokens);
-        }
-    }
 
     private int GetSuggestedMaxOutputTokens(string? modelName)
     {
@@ -406,20 +266,7 @@ public class ConfigurationWizardService
 
             try
             {
-                // Create temporary config for testing
-                var testConfig = new GitGenConfiguration
-                {
-                    Type = model.Type,
-                    Provider = model.Provider,
-                    BaseUrl = model.Url,
-                    Model = model.ModelId,
-                    ApiKey = model.ApiKey,
-                    RequiresAuth = model.RequiresAuth,
-                    MaxOutputTokens = model.MaxOutputTokens,
-                    Temperature = model.Temperature
-                };
-
-                var provider = _providerFactory.CreateProvider(testConfig, model);
+                var provider = _providerFactory.CreateProvider(model);
                 var (success, useLegacyTokens, detectedTemperature) =
                     await provider.TestConnectionAndDetectParametersAsync();
 
@@ -450,77 +297,6 @@ public class ConfigurationWizardService
         return false;
     }
 
-    /// <summary>
-    ///     Changes the AI model to the specified model name while preserving other configuration settings.
-    ///     Performs automatic parameter detection and testing before applying changes.
-    /// </summary>
-    /// <param name="newModelName">The name of the new model to switch to.</param>
-    /// <returns>True if the model was successfully changed; otherwise, false.</returns>
-    public async Task<bool> ChangeModelAsync(string newModelName)
-    {
-        var currentConfig = _configurationService.LoadConfiguration();
-        if (!currentConfig.IsValid)
-        {
-            _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationInvalid}");
-            return false;
-        }
-
-        try
-        {
-            _logger.Information($"🔄 Changing model from '{currentConfig.Model}' to '{newModelName}'...");
-            _logger.Information(
-                $"ℹ️ Keeping provider: {currentConfig.Provider}, Type: {currentConfig.Type}, Base URL: {currentConfig.BaseUrl}");
-            Console.WriteLine();
-
-            // Create a new configuration with the new model but same provider settings
-            var newConfig = new GitGenConfiguration
-            {
-                Type = currentConfig.Type,
-                Provider = currentConfig.Provider,
-                BaseUrl = currentConfig.BaseUrl,
-                ApiKey = currentConfig.ApiKey,
-                RequiresAuth = currentConfig.RequiresAuth,
-                Model = newModelName,
-                // These will be rediscovered during testing
-                OpenAiUseLegacyMaxTokens = currentConfig.OpenAiUseLegacyMaxTokens,
-                Temperature = currentConfig.Temperature
-            };
-
-            // Test the new configuration and detect parameters
-            _logger.Information("🧪 Testing new model configuration and detecting optimal parameters...");
-            var provider = _providerFactory.CreateProvider(newConfig);
-
-            var (success, useLegacyTokens, detectedTemperature) =
-                await provider.TestConnectionAndDetectParametersAsync();
-
-            if (!success)
-            {
-                _logger.Error($"❌ Failed to connect to model '{newModelName}'. Model change cancelled.");
-                return false;
-            }
-
-            // Update the configuration with detected parameters
-            newConfig.OpenAiUseLegacyMaxTokens = useLegacyTokens;
-            newConfig.Temperature = detectedTemperature;
-
-            _logger.Success("✅ Model test successful!");
-            _logger.Information(
-                $"ℹ️ Detected API parameter style: {(useLegacyTokens ? "Legacy (max_tokens)" : "Modern (max_completion_tokens)")}");
-            _logger.Information($"ℹ️ Model temperature: {detectedTemperature}");
-            Console.WriteLine();
-
-            // No legacy support - cannot save without secure configuration
-            _logger.Error("Cannot save configuration - secure configuration service not available.");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Failed to change model configuration");
-            _logger.Error($"❌ Model change failed: {ex.Message}");
-            return false;
-        }
-    }
-
 
 
     private void DisplayConfigChange(string field, string? oldValue, string? newValue)
@@ -529,22 +305,6 @@ public class ConfigurationWizardService
             _logger.Information($"   {field}: {oldValue ?? "(not set)"} → {newValue ?? "(not set)"} ✨");
         else
             _logger.Information($"   {field}: {newValue ?? "(not set)"}");
-    }
-
-    private GitGenConfiguration CloneConfiguration(GitGenConfiguration source)
-    {
-        return new GitGenConfiguration
-        {
-            Type = source.Type,
-            Provider = source.Provider,
-            BaseUrl = source.BaseUrl,
-            Model = source.Model,
-            ApiKey = source.ApiKey,
-            RequiresAuth = source.RequiresAuth,
-            OpenAiUseLegacyMaxTokens = source.OpenAiUseLegacyMaxTokens,
-            Temperature = source.Temperature,
-            MaxOutputTokens = source.MaxOutputTokens
-        };
     }
 
 
@@ -595,9 +355,25 @@ public class ConfigurationWizardService
             return null;
         }
 
+        // Check if this will be the first (and thus default) model
+        var settings = await _secureConfigService!.LoadSettingsAsync();
+        bool isFirstModel = settings.Models.Count == 0;
+        
         // Save the model
         await _secureConfigService!.AddModelAsync(model);
         _logger.Success($"{Constants.UI.CheckMark} Model '{model.Name}' saved successfully!");
+        
+        // Warn if this is the first model and appears to be for public/free use
+        if (isFirstModel && AppearsToBePublicModel(model))
+        {
+            _logger.Information("");
+            _logger.Warning($"{Constants.UI.WarningSymbol} Important: This model has been set as your default because it's your first model.");
+            _logger.Warning("   Since it appears to be configured for public/free use, running 'gitgen' without");
+            _logger.Warning("   specifying a model will send your code to this service.");
+            _logger.Information("");
+            _logger.Information("   Consider adding a secure model and setting it as default for private repositories.");
+            _logger.Information("   You can change the default model anytime using 'gitgen config'.");
+        }
         
         return model;
     }
@@ -650,6 +426,10 @@ public class ConfigurationWizardService
         _logger.Muted("💡 Tip: Configure a free model as @free to save money on public repositories");
         _logger.Muted("   where sending code to free APIs doesn't matter.");
         _logger.Muted("   OpenRouter often has great free models in public previews!");
+        _logger.Warning("");
+        _logger.Warning("⚠️  Important: Avoid setting a free model as your default to prevent accidentally");
+        _logger.Warning("   sending private code to public APIs. Always use explicit model selection");
+        _logger.Warning("   (e.g., 'gitgen @free') when working with public repositories.");
         _logger.Information("");
         
         // Suggest a dash-stripped alias if the model name contains dashes
@@ -877,20 +657,7 @@ public class ConfigurationWizardService
         
         try
         {
-            // Create a temporary GitGenConfiguration for testing
-            var testConfig = new GitGenConfiguration
-            {
-                Type = model.Type,
-                Provider = model.Provider,
-                BaseUrl = model.Url,
-                Model = model.ModelId,
-                ApiKey = model.ApiKey,
-                RequiresAuth = model.RequiresAuth,
-                MaxOutputTokens = model.MaxOutputTokens,
-                Temperature = model.Temperature
-            };
-
-            var provider = _providerFactory.CreateProvider(testConfig, model);
+            var provider = _providerFactory.CreateProvider(model);
             var (success, useLegacyTokens, detectedTemperature) = await provider.TestConnectionAndDetectParametersAsync();
 
             if (!success)
@@ -902,10 +669,6 @@ public class ConfigurationWizardService
             // Store the detected parameters
             model.UseLegacyMaxTokens = useLegacyTokens;
             model.Temperature = detectedTemperature;
-
-            _logger.Success("✅ Parameter detection complete.");
-            _logger.Information($"ℹ️ Token parameter: {(useLegacyTokens ? "Legacy (max_tokens)" : "Modern (max_completion_tokens)")}");
-            _logger.Information($"ℹ️ Temperature: {detectedTemperature}");
 
             // Perform a full test
             _logger.Information("");
@@ -1065,5 +828,48 @@ public class ConfigurationWizardService
         }
         
         _logger.Information("");
+    }
+    
+    /// <summary>
+    ///     Checks if a model appears to be configured for public/free use based on its aliases and description.
+    /// </summary>
+    private bool AppearsToBePublicModel(ModelConfiguration model)
+    {
+        // Keywords that suggest public/free usage
+        string[] publicKeywords = { "free", "public", "open" };
+        
+        // Check aliases
+        if (model.Aliases != null)
+        {
+            foreach (var alias in model.Aliases)
+            {
+                if (publicKeywords.Any(keyword => alias.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+        }
+        
+        // Check note/description
+        if (!string.IsNullOrWhiteSpace(model.Note))
+        {
+            if (publicKeywords.Any(keyword => model.Note.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        
+        // Check if it's a known free provider endpoint
+        if (!string.IsNullOrWhiteSpace(model.Url))
+        {
+            // Check for common free model endpoints
+            if (model.Url.Contains("openrouter", StringComparison.OrdinalIgnoreCase) && 
+                model.ModelId != null && model.ModelId.Contains(":free", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        
+        // Check if pricing indicates it's free
+        if (model.Pricing != null && 
+            model.Pricing.InputPer1M == 0 && 
+            model.Pricing.OutputPer1M == 0)
+            return true;
+        
+        return false;
     }
 }

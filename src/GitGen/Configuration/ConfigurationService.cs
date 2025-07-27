@@ -21,29 +21,13 @@ public class ConfigurationService
         _secureConfig = secureConfig;
     }
 
-    /// <summary>
-    ///     Loads GitGen configuration from secure storage.
-    /// </summary>
-    /// <returns>A GitGenConfiguration object populated from the active model.</returns>
-    public GitGenConfiguration LoadConfiguration()
-    {
-        if (_secureConfig == null)
-        {
-            _logger.Error("Secure configuration service not available");
-            return new GitGenConfiguration();
-        }
-
-        var task = LoadConfigurationAsync();
-        task.Wait();
-        return task.Result ?? new GitGenConfiguration();
-    }
 
     /// <summary>
     ///     Loads the active model configuration asynchronously.
     /// </summary>
     /// <param name="modelName">Optional specific model name to load.</param>
     /// <returns>The configuration for the specified or default model.</returns>
-    public async Task<GitGenConfiguration?> LoadConfigurationAsync(string? modelName = null)
+    public async Task<ModelConfiguration?> LoadConfigurationAsync(string? modelName = null)
     {
         if (_secureConfig == null)
         {
@@ -62,18 +46,24 @@ public class ConfigurationService
         _logger.Debug("Found models in secure storage");
 
         ModelConfiguration? model;
+        bool specificModelRequested = !string.IsNullOrEmpty(modelName);
 
-        if (!string.IsNullOrEmpty(modelName))
+        if (specificModelRequested)
         {
+            _logger.Debug($"Loading specific model: '{modelName}'");
             model = await _secureConfig.GetModelAsync(modelName);
             if (model == null)
             {
-                _logger.Error($"Model '{modelName}' not found");
+                // IMPORTANT: When a specific model is requested but not found,
+                // we must return null. Never fall back to the default model.
+                _logger.Error($"Model '{modelName}' not found - no fallback will be attempted");
                 return null;
             }
+            _logger.Debug($"Successfully loaded model '{model.Name}' (requested as '{modelName}')");
         }
         else
         {
+            _logger.Debug("No specific model requested, loading default model");
             model = await _secureConfig.GetDefaultModelAsync();
             if (model == null)
             {
@@ -81,14 +71,22 @@ public class ConfigurationService
                 _logger.Debug("Models exist but no default model is set");
                 return null;
             }
+            _logger.Debug($"Successfully loaded default model '{model.Name}'");
         }
 
         // Update last used timestamp
         model.LastUsed = DateTime.UtcNow;
         await _secureConfig.UpdateModelAsync(model);
 
-        // Convert to GitGenConfiguration for backward compatibility
-        return ConvertToGitGenConfiguration(model);
+        // Debug log the model configuration
+        _logger.Debug("Model configuration loaded:");
+        _logger.Debug("  Model.Name: {Name}", model.Name);
+        _logger.Debug("  Model.Type: {Type}", model.Type ?? "(null)");
+        _logger.Debug("  Model.Provider: {Provider}", model.Provider ?? "(null)");
+        _logger.Debug("  Model.Url: {Url}", model.Url ?? "(null)");
+        _logger.Debug("  Model.ModelId: {ModelId}", model.ModelId ?? "(null)");
+
+        return model;
     }
 
     /// <summary>
@@ -101,26 +99,6 @@ public class ConfigurationService
             return null;
 
         return await _secureConfig.GetDefaultModelAsync();
-    }
-
-    /// <summary>
-    ///     Converts a ModelConfiguration to GitGenConfiguration for backward compatibility.
-    /// </summary>
-    private GitGenConfiguration ConvertToGitGenConfiguration(ModelConfiguration model)
-    {
-        return new GitGenConfiguration
-        {
-            Type = model.Type,
-            Provider = model.Provider,
-            BaseUrl = model.Url,  // Map Url back to BaseUrl for compatibility
-            Model = model.ModelId,
-            ApiKey = model.ApiKey,
-            RequiresAuth = model.RequiresAuth,
-            OpenAiUseLegacyMaxTokens = model.UseLegacyMaxTokens,
-            Temperature = model.Temperature,
-            MaxOutputTokens = model.MaxOutputTokens,
-            SystemPrompt = model.SystemPrompt
-        };
     }
 
     /// <summary>

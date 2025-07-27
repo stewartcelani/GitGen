@@ -51,11 +51,11 @@ public class SecureConfigurationService : ISecureConfigurationService
         if (!File.Exists(_configPath))
         {
             _logger.Debug("No configuration file found at {Path}", _configPath);
-            _cachedSettings = new GitGenSettings 
+            // Don't cache empty settings - return without caching so next call will check disk again
+            return new GitGenSettings 
             { 
                 Settings = new AppSettings { ConfigPath = _configPath } 
             };
-            return _cachedSettings;
         }
 
         try
@@ -90,12 +90,11 @@ public class SecureConfigurationService : ISecureConfigurationService
                     File.Copy(_configPath, backupPath, true);
                     _logger.Information("Corrupted config backed up to: {Path}", backupPath);
                     
-                    // Return empty settings
-                    _cachedSettings = new GitGenSettings 
+                    // Return empty settings without caching
+                    return new GitGenSettings 
                     { 
                         Settings = new AppSettings { ConfigPath = _configPath } 
                     };
-                    return _cachedSettings;
                 }
             }
             
@@ -117,11 +116,11 @@ public class SecureConfigurationService : ISecureConfigurationService
         catch (Exception ex)
         {
             _logger.Error(ex, "Failed to read configuration file from {Path}", _configPath);
-            _cachedSettings = new GitGenSettings 
+            // Return empty settings without caching on error
+            return new GitGenSettings 
             { 
                 Settings = new AppSettings { ConfigPath = _configPath } 
             };
-            return _cachedSettings;
         }
     }
 
@@ -154,16 +153,27 @@ public class SecureConfigurationService : ISecureConfigurationService
     /// <inheritdoc />
     public async Task<ModelConfiguration?> GetModelAsync(string nameOrId)
     {
+        _logger.Debug($"GetModelAsync called with: '{nameOrId}'");
         var settings = await LoadSettingsAsync();
+        
+        _logger.Debug($"Total models configured: {settings.Models.Count}");
 
         // Try exact match by ID first
         var model = settings.Models.FirstOrDefault(m => m.Id == nameOrId);
-        if (model != null) return model;
+        if (model != null) 
+        {
+            _logger.Debug($"Exact match found by ID: '{model.Name}'");
+            return model;
+        }
 
         // Try exact match by name (case-insensitive)
         model = settings.Models.FirstOrDefault(m =>
             m.Name.Equals(nameOrId, StringComparison.OrdinalIgnoreCase));
-        if (model != null) return model;
+        if (model != null) 
+        {
+            _logger.Debug($"Exact match found by name: '{model.Name}'");
+            return model;
+        }
 
         // Try exact match by alias (case-insensitive)
         model = settings.Models.FirstOrDefault(m =>
@@ -175,10 +185,13 @@ public class SecureConfigurationService : ISecureConfigurationService
             return model;
         }
 
+        _logger.Debug($"No exact match found for '{nameOrId}'");
+
         // If no exact match found and partial matching is enabled, try partial matching
         if (settings.Settings.EnablePartialAliasMatching && 
             nameOrId.Length >= settings.Settings.MinimumAliasMatchLength)
         {
+            _logger.Debug($"Attempting partial match (enabled={settings.Settings.EnablePartialAliasMatching}, min length={settings.Settings.MinimumAliasMatchLength})");
             var partialMatches = await GetModelsByPartialMatchAsync(nameOrId);
             
             if (partialMatches.Count == 1)
@@ -192,8 +205,17 @@ public class SecureConfigurationService : ISecureConfigurationService
                 var matchNames = string.Join(", ", partialMatches.Select(m => m.Name));
                 _logger.Debug("Multiple models match '{Input}': {Matches}", nameOrId, matchNames);
             }
+            else
+            {
+                _logger.Debug($"No partial matches found for '{nameOrId}'");
+            }
+        }
+        else
+        {
+            _logger.Debug($"Partial matching not attempted (enabled={settings.Settings.EnablePartialAliasMatching}, input length={nameOrId.Length}, min length={settings.Settings.MinimumAliasMatchLength})");
         }
 
+        _logger.Debug($"GetModelAsync returning null for '{nameOrId}'");
         return null;
     }
 
@@ -409,8 +431,13 @@ public class SecureConfigurationService : ISecureConfigurationService
     /// <inheritdoc />
     public async Task<List<ModelConfiguration>> GetModelsByPartialMatchAsync(string partial)
     {
+        _logger.Debug($"GetModelsByPartialMatchAsync called with: '{partial}'");
+        
         if (string.IsNullOrWhiteSpace(partial))
+        {
+            _logger.Debug("Partial string is null or whitespace, returning empty list");
             return new List<ModelConfiguration>();
+        }
         
         var settings = await LoadSettingsAsync();
         
@@ -418,6 +445,7 @@ public class SecureConfigurationService : ISecureConfigurationService
         if (!settings.Settings.EnablePartialAliasMatching || 
             partial.Length < settings.Settings.MinimumAliasMatchLength)
         {
+            _logger.Debug($"Partial matching criteria not met (enabled={settings.Settings.EnablePartialAliasMatching}, length={partial.Length}, min={settings.Settings.MinimumAliasMatchLength})");
             return new List<ModelConfiguration>();
         }
         
@@ -427,6 +455,15 @@ public class SecureConfigurationService : ISecureConfigurationService
             (m.Aliases != null && m.Aliases.Any(alias => 
                 alias.StartsWith(partial, StringComparison.OrdinalIgnoreCase)))
         ).ToList();
+        
+        _logger.Debug($"Partial match results for '{partial}': {matches.Count} matches");
+        foreach (var match in matches)
+        {
+            var aliasInfo = match.Aliases != null && match.Aliases.Count > 0 
+                ? $" (aliases: {string.Join(", ", match.Aliases)})" 
+                : "";
+            _logger.Debug($"  - {match.Name}{aliasInfo}");
+        }
         
         return matches;
     }

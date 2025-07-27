@@ -28,30 +28,27 @@ public class ProviderFactory
     /// <summary>
     ///     Creates a provider instance based on the specified configuration.
     /// </summary>
-    /// <param name="config">The GitGen configuration containing provider type and settings.</param>
-    /// <param name="modelConfig">Optional model configuration for the provider.</param>
+    /// <param name="modelConfig">The model configuration containing provider type and settings.</param>
     /// <returns>An instance of the appropriate <see cref="ICommitMessageProvider" />.</returns>
     /// <exception cref="NotSupportedException">Thrown when the provider type is not supported.</exception>
-    public ICommitMessageProvider CreateProvider(GitGenConfiguration config, ModelConfiguration? modelConfig = null)
+    public ICommitMessageProvider CreateProvider(ModelConfiguration modelConfig)
     {
-        var type = config.Type?.ToLowerInvariant();
+        var type = modelConfig.Type?.ToLowerInvariant();
 
         return type switch
         {
             "openai" => new OpenAIProvider(
                 _serviceProvider.GetRequiredService<HttpClientService>(),
                 _serviceProvider.GetRequiredService<ConsoleLoggerFactory>().CreateLogger<OpenAIProvider>(),
-                config,
-                _serviceProvider.GetService<ILlmCallTracker>(),
-                modelConfig),
+                modelConfig,
+                _serviceProvider.GetService<ILlmCallTracker>()),
             "openai-compatible" => new OpenAIProvider(
                 _serviceProvider.GetRequiredService<HttpClientService>(),
                 _serviceProvider.GetRequiredService<ConsoleLoggerFactory>().CreateLogger<OpenAIProvider>(),
-                config,
-                _serviceProvider.GetService<ILlmCallTracker>(),
-                modelConfig),
+                modelConfig,
+                _serviceProvider.GetService<ILlmCallTracker>()),
             _ => throw new NotSupportedException(
-                $"API type '{config.Type}' is not supported. Supported types: openai, openai-compatible")
+                $"API type '{modelConfig.Type}' is not supported. Supported types: openai, openai-compatible")
         };
     }
 }
