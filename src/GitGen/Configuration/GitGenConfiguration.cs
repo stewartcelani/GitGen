@@ -42,6 +42,12 @@ public class GitGenConfiguration
     public int MaxOutputTokens { get; set; } = 5000;
 
     /// <summary>
+    ///     Custom system prompt to append to the base GitGen instructions.
+    ///     This allows per-model customization of behavior.
+    /// </summary>
+    public string? SystemPrompt { get; set; }
+
+    /// <summary>
     ///     Validates that the configuration has all necessary values and passes comprehensive validation.
     /// </summary>
     public bool IsValid =>

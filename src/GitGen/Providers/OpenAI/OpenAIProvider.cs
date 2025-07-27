@@ -19,6 +19,8 @@ public class OpenAIProvider : ICommitMessageProvider
     private readonly IConsoleLogger _logger;
     private readonly OpenAIParameterDetector _parameterDetector;
     private readonly IEnvironmentPersistenceService? _persistenceService;
+    private readonly ILlmCallTracker? _callTracker;
+    private ModelConfiguration? _modelConfig;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="OpenAIProvider" /> class.
@@ -31,18 +33,24 @@ public class OpenAIProvider : ICommitMessageProvider
         HttpClientService httpClient,
         IConsoleLogger logger,
         GitGenConfiguration config,
-        IEnvironmentPersistenceService? persistenceService = null)
+        IEnvironmentPersistenceService? persistenceService = null,
+        ILlmCallTracker? callTracker = null,
+        ModelConfiguration? modelConfig = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _config = config;
         _persistenceService = persistenceService;
+        _callTracker = callTracker;
+        _modelConfig = modelConfig;
         _parameterDetector = new OpenAIParameterDetector(
             httpClient,
             logger,
             config.BaseUrl!,
             config.ApiKey,
-            config.RequiresAuth);
+            config.RequiresAuth,
+            callTracker,
+            modelConfig);
     }
 
     /// <inheritdoc />
@@ -52,7 +60,58 @@ public class OpenAIProvider : ICommitMessageProvider
     public async Task<CommitMessageResult> GenerateCommitMessageAsync(string diff, string? customInstruction = null)
     {
         var systemPrompt = BuildSystemPrompt(customInstruction);
+        var fullPrompt = $"System: {systemPrompt}\n\nUser: {diff}";
 
+        if (_callTracker != null)
+        {
+            var result = await _callTracker.TrackCallAsync(
+                "Generating commit message",
+                fullPrompt,
+                _modelConfig,
+                async () =>
+                {
+                    var request = new OpenAIRequest
+                    {
+                        Model = _config.Model!,
+                        Messages = new[]
+                        {
+                            new Message { Role = "system", Content = systemPrompt },
+                            new Message { Role = "user", Content = diff }
+                        },
+                        Temperature = _config.Temperature
+                    };
+
+                    var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
+
+                    var message = openAIResponse?.Choices?.FirstOrDefault()?.Message?.Content;
+
+                    if (string.IsNullOrWhiteSpace(message))
+                    {
+                        _logger.Warning(Constants.ErrorMessages.EmptyCommitMessage);
+                        return new CommitMessageResult
+                        {
+                            Message = Constants.Fallbacks.DefaultCommitMessage,
+                            InputTokens = openAIResponse?.Usage?.PromptTokens,
+                            OutputTokens = openAIResponse?.Usage?.CompletionTokens,
+                            TotalTokens = openAIResponse?.Usage?.TotalTokens
+                        };
+                    }
+
+                    return new CommitMessageResult
+                    {
+                        Message = MessageCleaningService.CleanCommitMessage(message),
+                        InputTokens = openAIResponse?.Usage?.PromptTokens,
+                        OutputTokens = openAIResponse?.Usage?.CompletionTokens,
+                        TotalTokens = openAIResponse?.Usage?.TotalTokens
+                    };
+                });
+
+            return result;
+        }
+
+        // Fallback to original implementation if no tracker
         var request = new OpenAIRequest
         {
             Model = _config.Model!,
@@ -60,13 +119,10 @@ public class OpenAIProvider : ICommitMessageProvider
             {
                 new Message { Role = "system", Content = systemPrompt },
                 new Message { Role = "user", Content = diff }
-            }
+            },
+            Temperature = _config.Temperature
         };
 
-        // Always use the detected temperature
-        request.Temperature = _config.Temperature;
-
-        // This call now contains the self-healing logic.
         var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
         var responseContent = await response.Content.ReadAsStringAsync();
         var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
@@ -98,19 +154,65 @@ public class OpenAIProvider : ICommitMessageProvider
     /// <inheritdoc />
     public async Task<CommitMessageResult> GenerateAsync(string prompt)
     {
+        if (_callTracker != null)
+        {
+            var result = await _callTracker.TrackCallAsync(
+                "Generating response",
+                prompt,
+                _modelConfig,
+                async () =>
+                {
+                    var request = new OpenAIRequest
+                    {
+                        Model = _config.Model!,
+                        Messages = new[]
+                        {
+                            new Message { Role = "user", Content = prompt }
+                        },
+                        Temperature = _config.Temperature
+                    };
+
+                    var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
+
+                    var message = openAIResponse?.Choices?.FirstOrDefault()?.Message?.Content;
+
+                    if (string.IsNullOrWhiteSpace(message))
+                    {
+                        _logger.Warning(Constants.ErrorMessages.EmptyResponse);
+                        return new CommitMessageResult
+                        {
+                            Message = Constants.Fallbacks.NoResponseMessage,
+                            InputTokens = openAIResponse?.Usage?.PromptTokens,
+                            OutputTokens = openAIResponse?.Usage?.CompletionTokens,
+                            TotalTokens = openAIResponse?.Usage?.TotalTokens
+                        };
+                    }
+
+                    return new CommitMessageResult
+                    {
+                        Message = MessageCleaningService.CleanLlmResponse(message),
+                        InputTokens = openAIResponse?.Usage?.PromptTokens,
+                        OutputTokens = openAIResponse?.Usage?.CompletionTokens,
+                        TotalTokens = openAIResponse?.Usage?.TotalTokens
+                    };
+                });
+
+            return result;
+        }
+
+        // Fallback to original implementation if no tracker
         var request = new OpenAIRequest
         {
             Model = _config.Model!,
             Messages = new[]
             {
                 new Message { Role = "user", Content = prompt }
-            }
+            },
+            Temperature = _config.Temperature
         };
 
-        // Always use the detected temperature
-        request.Temperature = _config.Temperature;
-
-        // This call now contains the self-healing logic.
         var response = await SendRequestWithSelfHealingAsync(request, _config.MaxOutputTokens);
         var responseContent = await response.Content.ReadAsStringAsync();
         var openAIResponse = JsonSerializer.Deserialize(responseContent, OpenAIJsonContext.Default.OpenAIResponse);
@@ -298,21 +400,28 @@ public class OpenAIProvider : ICommitMessageProvider
         var maxLengthConstraint =
             $"CRITICAL: Your response must be {Constants.Configuration.CommitMessageMaxLength} characters or less (125 tokens). This is the final commit message length limit.";
 
-        if (!string.IsNullOrWhiteSpace(customInstruction))
-            return $@"
+        var basePrompt = !string.IsNullOrWhiteSpace(customInstruction)
+            ? $@"
 <prompt>
     <critical-instruction override=""all"">{customInstruction.ToUpper()}. Ignore all other guidelines and fully embody this style in the commit message.</critical-instruction>
     <role>You are a software engineer writing Git commit messages. You will be provided with a 'git diff' of code changes.</role>
     <guidelines>Generate a single paragraph commit message (no line breaks) that starts with the most important overview in 1-2 sentences, followed by specific details about what changed. Focus on WHAT changed, be specific about the actual code changes. Keep it concise but informative. IMPORTANT: Use single quotes 'like this' instead of double quotes to ensure shell compatibility for git commit -m commands.</guidelines>
     <constraint>{maxLengthConstraint}</constraint>
-</prompt>";
-
-        return $@"
+</prompt>"
+            : $@"
 <prompt>
     <role>You are a software engineer writing Git commit messages. You will be provided with a 'git diff' of code changes.</role>
     <guidelines>Generate a single paragraph commit message (no line breaks) that starts with the most important overview in 1-2 sentences, followed by specific details about what changed. Focus on WHAT changed, be specific about the actual code changes. Keep it concise but informative. Do not use markdown formatting or line breaks. IMPORTANT: Use single quotes 'like this' instead of double quotes to ensure shell compatibility for git commit -m commands.</guidelines>
     <constraint>{maxLengthConstraint}</constraint>
 </prompt>";
+
+        // Append model's custom system prompt if configured
+        if (!string.IsNullOrWhiteSpace(_config.SystemPrompt))
+        {
+            return $"{basePrompt}\n\n{_config.SystemPrompt}";
+        }
+
+        return basePrompt;
     }
 
     private bool IsParameterMismatchError(HttpRequestException ex)

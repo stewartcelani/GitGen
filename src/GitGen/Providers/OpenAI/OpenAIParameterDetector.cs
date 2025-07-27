@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using GitGen.Configuration;
 using GitGen.Exceptions;
 using GitGen.Services;
 
@@ -28,19 +29,25 @@ public class OpenAIParameterDetector
     private readonly HttpClientService _httpClient;
     private readonly IConsoleLogger _logger;
     private readonly bool _requiresAuth;
+    private readonly ILlmCallTracker? _callTracker;
+    private readonly ModelConfiguration? _modelConfig;
 
     public OpenAIParameterDetector(
         HttpClientService httpClient,
         IConsoleLogger logger,
         string baseUrl,
         string? apiKey,
-        bool requiresAuth)
+        bool requiresAuth,
+        ILlmCallTracker? callTracker = null,
+        ModelConfiguration? modelConfig = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _baseUrl = baseUrl;
         _apiKey = apiKey;
         _requiresAuth = requiresAuth;
+        _callTracker = callTracker;
+        _modelConfig = modelConfig;
     }
 
     /// <summary>

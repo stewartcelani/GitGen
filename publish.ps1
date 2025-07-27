@@ -5,8 +5,34 @@
 
 param(
 # The default value is set after this block to allow for dynamic path resolution.
-    [string]$OutputPath = ""
+    [string]$OutputPath = "",
+    
+    [Alias("Current", "CurrentPlatform", "CurrentPlatformOnly")]
+    [switch]$CurrentOnly
 )
+
+# --- Parameter Validation ---
+# Check for unsupported parameters
+$validParameters = @('OutputPath', 'CurrentOnly', 'Current', 'CurrentPlatform', 'CurrentPlatformOnly', 'Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'InformationAction', 'ErrorVariable', 'WarningVariable', 'InformationVariable', 'OutVariable', 'OutBuffer', 'PipelineVariable')
+$providedParameters = $PSBoundParameters.Keys
+
+$invalidParameters = $providedParameters | Where-Object { $_ -notin $validParameters }
+
+if ($invalidParameters.Count -gt 0) {
+    Write-Host "❌ Error: Unsupported parameter(s) detected: $($invalidParameters -join ', ')" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "📋 Supported parameters:" -ForegroundColor Yellow
+    Write-Host "   -OutputPath <string>    : Specify the output directory for published files (default: ./dist)" -ForegroundColor Gray
+    Write-Host "   -CurrentOnly            : Publish only for the current platform instead of all platforms" -ForegroundColor Gray
+    Write-Host "                             (aliases: -Current, -CurrentPlatform, -CurrentPlatformOnly)" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "💡 Usage examples:" -ForegroundColor Yellow
+    Write-Host "   .\publish.ps1                        # Publish for all platforms" -ForegroundColor Gray
+    Write-Host "   .\publish.ps1 -CurrentOnly           # Publish for current platform only" -ForegroundColor Gray
+    Write-Host "   .\publish.ps1 -OutputPath 'C:\temp'  # Publish to custom directory" -ForegroundColor Gray
+    Write-Host ""
+    exit 1
+}
 
 # --- Set dynamic default for OutputPath if not provided ---
 if (-not $PSBoundParameters.ContainsKey('OutputPath')) {
@@ -251,14 +277,35 @@ $ProjectVersion = Get-ProjectVersion -CsprojPath $CsprojPath
 Write-Host "ℹ️ Detected project version: $ProjectVersion" -ForegroundColor Yellow
 Write-Host ""
 
-Write-Host "📋 Publishing for all supported platforms..." -ForegroundColor Yellow
+# Detect current platform
+$currentRid = ""
+if ($IsWindows) { $currentRid = "win-x64" }
+elseif ($IsLinux) { $currentRid = "linux-x64" }
+elseif ($IsMacOS) {
+    $arch = uname -m
+    if ($arch -eq "arm64") { $currentRid = "osx-arm64" } else { $currentRid = "osx-x64" }
+}
+
+# Filter runtimes if -CurrentOnly is specified
+$RuntimesToPublish = $SupportedRuntimes
+if ($CurrentOnly) {
+    if ($currentRid) {
+        $RuntimesToPublish = $SupportedRuntimes | Where-Object { $_.RID -eq $currentRid }
+        Write-Host "📋 Publishing for current platform only ($currentRid)..." -ForegroundColor Yellow
+    } else {
+        Write-Host "❌ Could not detect current platform. Aborting." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "📋 Publishing for all supported platforms..." -ForegroundColor Yellow
+}
 Write-Host ""
 
 $successCount = 0
-$totalCount = $SupportedRuntimes.Count
+$totalCount = $RuntimesToPublish.Count
 $foldersToZip = @()
 
-foreach ($runtime in $SupportedRuntimes) {
+foreach ($runtime in $RuntimesToPublish) {
     $folderPath = Publish-Runtime -RuntimeId $runtime.RID -RuntimeName $runtime.Name -Extension $runtime.Extension -BaseOutputPath $OutputPath -Version $ProjectVersion
     if ($folderPath) {
         $successCount++
@@ -269,13 +316,6 @@ foreach ($runtime in $SupportedRuntimes) {
 
 # Copy current platform's build to root for convenience
 Write-Host "🚀 Copying current platform's build to root output path for convenience..." -ForegroundColor Magenta
-$currentRid = ""
-if ($IsWindows) { $currentRid = "win-x64" }
-elseif ($IsLinux) { $currentRid = "linux-x64" }
-elseif ($IsMacOS) {
-    $arch = uname -m
-    if ($arch -eq "arm64") { $currentRid = "osx-arm64" } else { $currentRid = "osx-x64" }
-}
 
 if ($currentRid) {
     $currentPlatformSourcePath = Join-Path $OutputPath "GitGen-v$ProjectVersion-$currentRid\GitGen"
@@ -321,7 +361,8 @@ Write-Host ""
 Write-Host "🎉 GitGen publishing complete!" -ForegroundColor Green
 Write-Host ""
 
-Write-Host "💡 Usage Example:" -ForegroundColor Yellow
+Write-Host "💡 Usage Examples:" -ForegroundColor Yellow
 Write-Host "   Publish for all platforms: .\publish.ps1" -ForegroundColor Gray
+Write-Host "   Publish for current platform only: .\publish.ps1 -CurrentOnly" -ForegroundColor Gray
 
 exit $($successCount -eq $totalCount ? 0 : 1)

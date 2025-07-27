@@ -30,17 +30,18 @@ public class CommitMessageGenerator
     /// <param name="config">The GitGen configuration containing provider settings.</param>
     /// <param name="diff">The git diff content to be summarized into a commit message.</param>
     /// <param name="customInstruction">An optional custom instruction to guide the generation style.</param>
+    /// <param name="modelConfig">Optional model configuration for pricing and other metadata.</param>
     /// <returns>A <see cref="CommitMessageResult" /> containing the cleaned message and token usage statistics.</returns>
     /// <exception cref="ArgumentException">Thrown when the diff is null or empty.</exception>
     /// <exception cref="AuthenticationException">Thrown when authentication with the AI provider fails.</exception>
     public async Task<CommitMessageResult> GenerateAsync(GitGenConfiguration config, string diff,
-        string? customInstruction = null)
+        string? customInstruction = null, ModelConfiguration? modelConfig = null)
     {
         if (string.IsNullOrWhiteSpace(diff)) throw new ArgumentException("Diff cannot be null or empty", nameof(diff));
 
         try
         {
-            var provider = _providerFactory.CreateProvider(config);
+            var provider = _providerFactory.CreateProvider(config, modelConfig);
             _logger.Information("Using {ProviderName} provider ({BaseUrl}, {Model}) to generate commit message",
                 provider.ProviderName, config.BaseUrl ?? "unknown", config.Model ?? "unknown");
 

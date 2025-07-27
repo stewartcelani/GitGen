@@ -29,9 +29,10 @@ public class ProviderFactory
     ///     Creates a provider instance based on the specified configuration.
     /// </summary>
     /// <param name="config">The GitGen configuration containing provider type and settings.</param>
+    /// <param name="modelConfig">Optional model configuration for the provider.</param>
     /// <returns>An instance of the appropriate <see cref="ICommitMessageProvider" />.</returns>
     /// <exception cref="NotSupportedException">Thrown when the provider type is not supported.</exception>
-    public ICommitMessageProvider CreateProvider(GitGenConfiguration config)
+    public ICommitMessageProvider CreateProvider(GitGenConfiguration config, ModelConfiguration? modelConfig = null)
     {
         var providerType = config.ProviderType?.ToLowerInvariant();
 
@@ -40,7 +41,10 @@ public class ProviderFactory
             "openai" => new OpenAIProvider(
                 _serviceProvider.GetRequiredService<HttpClientService>(),
                 _serviceProvider.GetRequiredService<ConsoleLoggerFactory>().CreateLogger<OpenAIProvider>(),
-                config),
+                config,
+                _serviceProvider.GetService<IEnvironmentPersistenceService>(),
+                _serviceProvider.GetService<ILlmCallTracker>(),
+                modelConfig),
             _ => throw new NotSupportedException(
                 $"Provider type '{config.ProviderType}' is not supported. Supported providers: openai")
         };

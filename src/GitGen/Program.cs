@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using GitGen.Configuration;
@@ -51,8 +52,14 @@ internal class Program
         return new ServiceCollection()
             .AddSingleton<ConsoleLoggerFactory>(factory)
             .AddSingleton(factory.CreateLogger<Program>())
+            .AddSingleton<ISecureConfigurationService>(provider =>
+                new SecureConfigurationService(factory.CreateLogger<SecureConfigurationService>()))
             .AddSingleton<ConfigurationService>(provider =>
-                new ConfigurationService(factory.CreateLogger<ConfigurationService>()))
+                new ConfigurationService(
+                    factory.CreateLogger<ConfigurationService>(),
+                    provider.GetRequiredService<ISecureConfigurationService>()))
+            .AddSingleton<ILlmCallTracker>(provider =>
+                new LlmCallTracker(factory.CreateLogger<LlmCallTracker>()))
             .AddSingleton<IEnvironmentPersistenceService>(provider =>
                 new EnvironmentPersistenceService(factory.CreateLogger<EnvironmentPersistenceService>()))
             .AddSingleton<HttpClientService>(provider =>
@@ -70,7 +77,8 @@ internal class Program
                     factory.CreateLogger<ConfigurationWizardService>(),
                     provider.GetRequiredService<ProviderFactory>(),
                     provider.GetRequiredService<IEnvironmentPersistenceService>(),
-                    provider.GetRequiredService<ConfigurationService>()))
+                    provider.GetRequiredService<ConfigurationService>(),
+                    provider.GetRequiredService<ISecureConfigurationService>()))
             .BuildServiceProvider();
     }
 
@@ -92,12 +100,29 @@ internal class Program
             versionLongOption
         };
 
+        // Add catch-all argument to support @ syntax
+        var inputArgument = new Argument<string[]>("input", "Input text with optional @model syntax")
+        {
+            Arity = ArgumentArity.ZeroOrMore
+        };
+        rootCommand.AddArgument(inputArgument);
+
         rootCommand.SetHandler(async invocationContext =>
         {
             var debug = invocationContext.ParseResult.GetValueForOption(debugOption);
             var customInstruction = invocationContext.ParseResult.GetValueForOption(customInstructionOption);
             var showVersionShort = invocationContext.ParseResult.GetValueForOption(versionShortOption);
             var showVersionLong = invocationContext.ParseResult.GetValueForOption(versionLongOption);
+            var inputArgs = invocationContext.ParseResult.GetValueForArgument(inputArgument) ?? Array.Empty<string>();
+
+            // Parse input arguments for @ syntax
+            var (modelName, parsedPrompt) = ParseInputForModelAndPrompt(inputArgs);
+            
+            // If prompt was parsed from input, use it (unless -p option overrides)
+            if (!string.IsNullOrEmpty(parsedPrompt) && string.IsNullOrEmpty(customInstruction))
+            {
+                customInstruction = parsedPrompt;
+            }
 
             if (showVersionShort || showVersionLong)
             {
@@ -110,11 +135,22 @@ internal class Program
             ConsoleLogger.SetDebugMode(debug);
 
             var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+
+            // Check for migration on first run
+            var migrated = await secureConfig.MigrateFromEnvironmentVariablesAsync();
+            if (migrated)
+            {
+                logger.Information("");
+                logger.Warning($"{Constants.UI.WarningSymbol} Your environment variable configuration has been migrated to secure storage.");
+                logger.Information("You can now remove GitGen environment variables if desired.");
+                Console.WriteLine();
+            }
 
             var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = configService.LoadConfiguration();
+            var config = await configService.LoadConfigurationAsync(modelName);
 
-            if (!config.IsValid)
+            if (config == null || !config.IsValid)
             {
                 logger.Error($"{Constants.UI.CrossMark} {Constants.Messages.ConfigurationMissing}");
                 logger.Information($"{Constants.UI.InfoSymbol} Starting configuration wizard...");
@@ -137,8 +173,11 @@ internal class Program
                 Console.WriteLine();
             }
 
+            // Get the active model for cost calculation
+            var activeModel = await configService.GetActiveModelAsync();
+
             // Main generation logic
-            await GenerateCommitMessage(serviceProvider, logger, config, customInstruction);
+            await GenerateCommitMessage(serviceProvider, logger, config, customInstruction, activeModel);
         });
 
         // Define 'configure' command
@@ -161,54 +200,240 @@ internal class Program
             var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
 
             var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = configService.LoadConfiguration();
+            var config = await configService.LoadConfigurationAsync();
 
-            if (!config.IsValid)
+            if (config == null || !config.IsValid)
             {
                 logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationInvalid}");
                 invocationContext.ExitCode = 1;
                 return;
             }
 
-            await TestLLMConnection(serviceProvider, logger, config);
+            var activeModel = await configService.GetActiveModelAsync();
+            await TestLLMConnection(serviceProvider, logger, config, activeModel);
         });
 
         // Define 'info' command
         var infoCommand = new Command("info", "Display current configuration information.");
 
-        infoCommand.SetHandler(invocationContext =>
+        infoCommand.SetHandler(async invocationContext =>
         {
             ConsoleLogger.SetDebugMode(false);
             var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
 
             var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = configService.LoadConfiguration();
+            var config = await configService.LoadConfigurationAsync();
+
+            if (config == null)
+            {
+                logger.Error($"{Constants.UI.CrossMark} No configuration found");
+                logger.Information("💡 To configure GitGen, run: gitgen configure");
+                invocationContext.ExitCode = 1;
+                return;
+            }
 
             DisplayConfigurationInfo(logger, config);
         });
 
-        // Define 'model' command
-        var modelCommand = new Command("model", "Change the AI model for the current provider configuration.");
-        var modelArgument = new Argument<string>("model-name", "The name of the model to switch to");
-        modelCommand.AddArgument(modelArgument);
-
-        modelCommand.SetHandler(async invocationContext =>
+        // Define 'model' command with subcommands
+        var modelCommand = new Command("model", "Manage AI models");
+        
+        // Subcommand: model set <name>
+        var modelSetCommand = new Command("set", "Set the default model");
+        var modelNameArgument = new Argument<string>("model-name", "The name of the model");
+        modelSetCommand.AddArgument(modelNameArgument);
+        
+        modelSetCommand.SetHandler(async invocationContext =>
         {
             ConsoleLogger.SetDebugMode(false);
-            var modelName = invocationContext.ParseResult.GetValueForArgument(modelArgument);
-
-            var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-            var success = await wizard.ChangeModelAsync(modelName);
-            invocationContext.ExitCode = success ? 0 : 1;
+            var modelName = invocationContext.ParseResult.GetValueForArgument(modelNameArgument);
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+            
+            try
+            {
+                await secureConfig.SetDefaultModelAsync(modelName);
+                logger.Success($"{Constants.UI.CheckMark} Default model changed to '{modelName}'");
+                invocationContext.ExitCode = 0;
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
         });
+        
+        // Subcommand: model delete <name>
+        var modelDeleteCommand = new Command("delete", "Delete a model");
+        modelDeleteCommand.AddArgument(modelNameArgument);
+        
+        modelDeleteCommand.SetHandler(async invocationContext =>
+        {
+            ConsoleLogger.SetDebugMode(false);
+            var modelName = invocationContext.ParseResult.GetValueForArgument(modelNameArgument);
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+            
+            try
+            {
+                // Confirm deletion
+                Console.Write($"Are you sure you want to delete model '{modelName}'? (y/N): ");
+                var confirm = Console.ReadLine()?.Trim().ToLower();
+                if (confirm != "y" && confirm != "yes")
+                {
+                    logger.Information("Deletion cancelled.");
+                    return;
+                }
+                
+                await secureConfig.DeleteModelAsync(modelName);
+                logger.Success($"{Constants.UI.CheckMark} Model '{modelName}' deleted successfully");
+                invocationContext.ExitCode = 0;
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
+        });
+        
+        // Subcommand: model info <name>
+        var modelInfoCommand = new Command("info", "Show detailed model information");
+        modelInfoCommand.AddArgument(modelNameArgument);
+        
+        modelInfoCommand.SetHandler(async invocationContext =>
+        {
+            ConsoleLogger.SetDebugMode(false);
+            var modelName = invocationContext.ParseResult.GetValueForArgument(modelNameArgument);
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+            
+            var model = await secureConfig.GetModelAsync(modelName);
+            if (model == null)
+            {
+                logger.Error($"{Constants.UI.CrossMark} Model '{modelName}' not found");
+                invocationContext.ExitCode = 1;
+                return;
+            }
+            
+            DisplayModelInfo(logger, model);
+            invocationContext.ExitCode = 0;
+        });
+        
+        // Subcommand: model alias
+        var modelAliasCommand = new Command("alias", "Manage model aliases");
+        
+        // Subcommand: model alias add <model> <alias>
+        var aliasAddCommand = new Command("add", "Add an alias to a model");
+        var aliasModelArgument = new Argument<string>("model", "The model name or ID");
+        var aliasNameArgument = new Argument<string>("alias", "The alias to add");
+        aliasAddCommand.AddArgument(aliasModelArgument);
+        aliasAddCommand.AddArgument(aliasNameArgument);
+        
+        aliasAddCommand.SetHandler(async invocationContext =>
+        {
+            ConsoleLogger.SetDebugMode(false);
+            var modelName = invocationContext.ParseResult.GetValueForArgument(aliasModelArgument);
+            var alias = invocationContext.ParseResult.GetValueForArgument(aliasNameArgument);
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+            
+            try
+            {
+                await secureConfig.AddAliasAsync(modelName, alias);
+                invocationContext.ExitCode = 0;
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
+        });
+        
+        // Subcommand: model alias remove <model> <alias>
+        var aliasRemoveCommand = new Command("remove", "Remove an alias from a model");
+        aliasRemoveCommand.AddArgument(aliasModelArgument);
+        aliasRemoveCommand.AddArgument(aliasNameArgument);
+        
+        aliasRemoveCommand.SetHandler(async invocationContext =>
+        {
+            ConsoleLogger.SetDebugMode(false);
+            var modelName = invocationContext.ParseResult.GetValueForArgument(aliasModelArgument);
+            var alias = invocationContext.ParseResult.GetValueForArgument(aliasNameArgument);
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+            
+            try
+            {
+                await secureConfig.RemoveAliasAsync(modelName, alias);
+                invocationContext.ExitCode = 0;
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
+        });
+        
+        // Subcommand: model alias list <model>
+        var aliasListCommand = new Command("list", "List aliases for a model");
+        aliasListCommand.AddArgument(aliasModelArgument);
+        
+        aliasListCommand.SetHandler(async invocationContext =>
+        {
+            ConsoleLogger.SetDebugMode(false);
+            var modelName = invocationContext.ParseResult.GetValueForArgument(aliasModelArgument);
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+            
+            try
+            {
+                var model = await secureConfig.GetModelAsync(modelName);
+                if (model == null)
+                {
+                    logger.Error($"{Constants.UI.CrossMark} Model '{modelName}' not found");
+                    invocationContext.ExitCode = 1;
+                    return;
+                }
+                
+                logger.Information($"{Constants.UI.ChartSymbol} Aliases for model '{model.Name}':");
+                
+                if (model.Aliases == null || model.Aliases.Count == 0)
+                {
+                    logger.Information("   No aliases configured");
+                }
+                else
+                {
+                    foreach (var alias in model.Aliases.OrderBy(a => a))
+                    {
+                        logger.Information($"   @{alias}");
+                    }
+                }
+                
+                invocationContext.ExitCode = 0;
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
+        });
+        
+        modelAliasCommand.AddCommand(aliasAddCommand);
+        modelAliasCommand.AddCommand(aliasRemoveCommand);
+        modelAliasCommand.AddCommand(aliasListCommand);
+        
+        modelCommand.AddCommand(modelSetCommand);
+        modelCommand.AddCommand(modelDeleteCommand);
+        modelCommand.AddCommand(modelInfoCommand);
+        modelCommand.AddCommand(modelAliasCommand);
 
         // Define 'reset' command
         var resetCommand = new Command("reset", "Reset all GitGen environment variables and configuration.");
-        resetCommand.SetHandler(invocationContext =>
+        resetCommand.SetHandler(async invocationContext =>
         {
             ConsoleLogger.SetDebugMode(false);
             var wizard = serviceProvider.GetRequiredService<ConfigurationWizardService>();
-            wizard.ResetConfiguration();
+            await wizard.ResetConfiguration();
             invocationContext.ExitCode = 0;
         });
 
@@ -253,9 +478,9 @@ internal class Program
             var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
 
             var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = configService.LoadConfiguration();
+            var config = await configService.LoadConfigurationAsync();
 
-            if (!config.IsValid)
+            if (config == null || !config.IsValid)
             {
                 logger.Error($"{Constants.UI.CrossMark} {Constants.Messages.ConfigurationMissing}");
                 logger.Information($"{Constants.UI.InfoSymbol} Starting configuration wizard...");
@@ -276,7 +501,8 @@ internal class Program
                 Console.WriteLine();
             }
 
-            await GenerateCommitMessage(serviceProvider, logger, config, customInstruction);
+            var activeModel = await configService.GetActiveModelAsync();
+            await GenerateCommitMessage(serviceProvider, logger, config, customInstruction, activeModel);
         });
 
         // Define 'health' command
@@ -288,7 +514,15 @@ internal class Program
             var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
 
             var configService = serviceProvider.GetRequiredService<ConfigurationService>();
-            var config = configService.LoadConfiguration();
+            var config = await configService.LoadConfigurationAsync();
+
+            if (config == null)
+            {
+                logger.Error($"{Constants.UI.CrossMark} No configuration found");
+                logger.Information("💡 To configure GitGen, run: gitgen configure");
+                invocationContext.ExitCode = 1;
+                return;
+            }
 
             // First display configuration info
             DisplayConfigurationInfo(logger, config);
@@ -301,13 +535,61 @@ internal class Program
             // Then test LLM connection if config is valid
             if (config.IsValid)
             {
-                await TestLLMConnection(serviceProvider, logger, config);
+                var activeModel = await configService.GetActiveModelAsync();
+                await TestLLMConnection(serviceProvider, logger, config, activeModel);
             }
             else
             {
                 logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationInvalid}");
                 logger.Information("💡 To configure GitGen, run: gitgen configure");
                 invocationContext.ExitCode = 1;
+            }
+        });
+
+        // Define 'list' command
+        var listCommand = new Command("list", "List all configured models");
+        
+        listCommand.SetHandler(async invocationContext =>
+        {
+            ConsoleLogger.SetDebugMode(false);
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            var secureConfig = serviceProvider.GetRequiredService<ISecureConfigurationService>();
+            var settings = await secureConfig.LoadSettingsAsync();
+            
+            if (!settings.Models.Any())
+            {
+                logger.Information("No models configured. Run 'gitgen configure' to add a model.");
+                return;
+            }
+            
+            logger.Information($"{Constants.UI.ChartSymbol} Configured Models ({settings.Models.Count}):");
+            Console.WriteLine();
+            
+            foreach (var model in settings.Models.OrderBy(m => m.Name))
+            {
+                var defaultMarker = model.Id == settings.DefaultModelId ? " ⭐" : "";
+                var lastUsed = model.LastUsed.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+                
+                logger.Information($"  {model.Name}{defaultMarker}");
+                logger.Muted($"    Provider: {model.ProviderType} | Model: {model.ModelId}");
+                
+                if (!string.IsNullOrWhiteSpace(model.Note))
+                    logger.Muted($"    Note: {model.Note}");
+                
+                if (model.Aliases != null && model.Aliases.Count > 0)
+                {
+                    var aliasesStr = string.Join(", ", model.Aliases.OrderBy(a => a).Select(a => $"@{a}"));
+                    logger.Muted($"    Aliases: {aliasesStr}");
+                }
+                    
+                if (model.Pricing != null)
+                {
+                    var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+                    logger.Muted($"    Pricing: {pricingInfo}");
+                }
+                
+                logger.Muted($"    Last used: {lastUsed}");
+                Console.WriteLine();
             }
         });
 
@@ -322,6 +604,8 @@ internal class Program
             Console.WriteLine("Usage:");
             Console.WriteLine("  gitgen [options]");
             Console.WriteLine("  gitgen [command]");
+            Console.WriteLine("  gitgen @<model> [prompt]     Use specific model via alias");
+            Console.WriteLine("  gitgen [prompt] @<model>     Alternative alias syntax");
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine(
@@ -334,7 +618,8 @@ internal class Program
             Console.WriteLine("  configure              Run the interactive configuration wizard.");
             Console.WriteLine("  test                   Send 'Testing.' to the LLM and print the response.");
             Console.WriteLine("  info                   Display current configuration information.");
-            Console.WriteLine("  model <model-name>     Change the AI model for the current provider configuration.");
+            Console.WriteLine("  list                   List all configured models");
+            Console.WriteLine("  model                  Manage AI models (set, delete, info, alias)");
             Console.WriteLine("  reset                  Reset all GitGen environment variables and configuration.");
             Console.WriteLine("  settings               Quick settings management");
             Console.WriteLine("  prompt <prompt-text>   Generate commit message with custom prompt instruction.");
@@ -346,6 +631,7 @@ internal class Program
         rootCommand.AddCommand(configureCommand);
         rootCommand.AddCommand(testCommand);
         rootCommand.AddCommand(infoCommand);
+        rootCommand.AddCommand(listCommand);
         rootCommand.AddCommand(modelCommand);
         rootCommand.AddCommand(resetCommand);
         rootCommand.AddCommand(settingsCommand);
@@ -357,7 +643,8 @@ internal class Program
 
     private static async Task GenerateCommitMessage(IServiceProvider sp, IConsoleLogger logger,
         GitGenConfiguration config,
-        string? instruction)
+        string? instruction,
+        ModelConfiguration? activeModel = null)
     {
         try
         {
@@ -379,22 +666,13 @@ internal class Program
             Console.WriteLine();
 
             var generator = sp.GetRequiredService<CommitMessageGenerator>();
-            var result = await generator.GenerateAsync(config, diff, instruction);
+            var result = await generator.GenerateAsync(config, diff, instruction, activeModel);
 
             logger.Success($"{Constants.UI.CheckMark} Generated Commit Message:");
 
             // Display commit message in teal color for visibility
             logger.Highlight($"{Constants.UI.CommitMessageQuotes}{result.Message}{Constants.UI.CommitMessageQuotes}",
                 ConsoleColor.DarkCyan);
-
-            Console.WriteLine();
-
-            // Display token usage information if available
-            if (result.InputTokens.HasValue && result.OutputTokens.HasValue)
-                logger.Muted(
-                    $"Generated with {result.InputTokens:N0} input tokens, {result.OutputTokens:N0} output tokens ({result.TotalTokens:N0} total) • {result.Message.Length} characters");
-            else
-                logger.Muted($"Generated with {result.Message.Length} characters");
 
             Console.WriteLine();
 
@@ -416,14 +694,14 @@ internal class Program
         }
     }
 
-    private static async Task TestLLMConnection(IServiceProvider sp, IConsoleLogger logger, GitGenConfiguration config)
+    private static async Task TestLLMConnection(IServiceProvider sp, IConsoleLogger logger, GitGenConfiguration config, ModelConfiguration? activeModel = null)
     {
         try
         {
             logger.Information($"{Constants.UI.TestTubeSymbol} {Constants.Messages.TestingConnection}");
 
             var providerFactory = sp.GetRequiredService<ProviderFactory>();
-            var provider = providerFactory.CreateProvider(config);
+            var provider = providerFactory.CreateProvider(config, activeModel);
 
             logger.Information(
                 $"{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {config.BaseUrl} ({config.Model ?? Constants.Fallbacks.UnknownModelName})");
@@ -436,15 +714,6 @@ internal class Program
             // Display response in teal color for visibility
             logger.Highlight($"{Constants.UI.CommitMessageQuotes}{result.Message}{Constants.UI.CommitMessageQuotes}",
                 ConsoleColor.DarkCyan);
-
-            Console.WriteLine();
-
-            // Display token usage information if available
-            if (result.InputTokens.HasValue && result.OutputTokens.HasValue)
-                logger.Muted(
-                    $"Generated with {result.InputTokens:N0} input tokens, {result.OutputTokens:N0} output tokens ({result.TotalTokens:N0} total) • {result.Message.Length} characters");
-            else
-                logger.Muted($"Generated with {result.Message.Length} characters");
 
             Console.WriteLine();
             logger.Success($"{Constants.UI.PartySymbol} Test completed successfully!");
@@ -514,5 +783,84 @@ internal class Program
                 : value;
             logger.Information($"   {varName}: {displayValue}");
         }
+    }
+
+    private static void DisplayModelInfo(IConsoleLogger logger, ModelConfiguration model)
+    {
+        logger.Information($"{Constants.UI.ChartSymbol} Model: {model.Name}");
+        logger.Information($"   Provider: {model.ProviderType}");
+        logger.Information($"   URL: {model.Url}");
+        logger.Information($"   Model ID: {model.ModelId}");
+        
+        // Mask API key for security
+        var maskedApiKey = string.IsNullOrEmpty(model.ApiKey)
+            ? "(not set)"
+            : $"{model.ApiKey[..Math.Min(8, model.ApiKey.Length)]}..." +
+              new string('*', Math.Max(0, model.ApiKey.Length - 8));
+        logger.Information($"   API Key: {maskedApiKey}");
+        
+        logger.Information($"   Requires Auth: {model.RequiresAuth}");
+        logger.Information($"   Legacy Max Tokens: {model.UseLegacyMaxTokens}");
+        logger.Information($"   Temperature: {model.Temperature}");
+        logger.Information($"   Max Output Tokens: {model.MaxOutputTokens}");
+        
+        if (!string.IsNullOrWhiteSpace(model.Note))
+            logger.Information($"   Note: {model.Note}");
+        
+        if (model.Aliases != null && model.Aliases.Count > 0)
+        {
+            var aliasesStr = string.Join(", ", model.Aliases.OrderBy(a => a).Select(a => $"@{a}"));
+            logger.Information($"   Aliases: {aliasesStr}");
+        }
+        
+        if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+        {
+            var truncatedPrompt = model.SystemPrompt.Length > 50 
+                ? model.SystemPrompt.Substring(0, 50) + "..." 
+                : model.SystemPrompt;
+            logger.Information($"   System Prompt: {truncatedPrompt}");
+        }
+        
+        if (model.Pricing != null)
+        {
+            var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+            logger.Information($"   Pricing: {pricingInfo}");
+            logger.Muted($"   Pricing updated: {model.Pricing.UpdatedAt.ToLocalTime():yyyy-MM-dd}");
+        }
+        
+        logger.Information($"   Is Default: {model.IsDefault}");
+        logger.Muted($"   Created: {model.CreatedAt.ToLocalTime():yyyy-MM-dd}");
+        logger.Muted($"   Last used: {model.LastUsed.ToLocalTime():yyyy-MM-dd HH:mm}");
+    }
+
+    /// <summary>
+    ///     Parses input arguments to extract @model syntax and custom prompt.
+    /// </summary>
+    /// <param name="args">The input arguments from command line.</param>
+    /// <returns>Tuple of (modelName, prompt) extracted from the arguments.</returns>
+    private static (string? modelName, string? prompt) ParseInputForModelAndPrompt(string[] args)
+    {
+        if (args == null || args.Length == 0)
+            return (null, null);
+        
+        string? modelName = null;
+        var promptParts = new List<string>();
+        
+        foreach (var arg in args)
+        {
+            if (arg.StartsWith("@") && arg.Length > 1)
+            {
+                // Extract model name (everything after @)
+                modelName = arg.Substring(1);
+            }
+            else
+            {
+                // Everything else is part of the prompt
+                promptParts.Add(arg);
+            }
+        }
+        
+        var prompt = promptParts.Count > 0 ? string.Join(" ", promptParts) : null;
+        return (modelName, prompt);
     }
 }
