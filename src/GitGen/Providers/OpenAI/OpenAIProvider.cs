@@ -290,6 +290,12 @@ public class OpenAIProvider : ICommitMessageProvider
         {
             return await SendRequestAsync(request);
         }
+        catch (HttpRequestException ex) when (IsContextLengthError(ex))
+        {
+            // Don't handle context length errors here - let them bubble up
+            // so the orchestrator can prompt the user
+            throw ContextLengthExceededException.ParseFromApiError(ex.Message, ex);
+        }
         catch (HttpRequestException ex) when (IsParameterMismatchError(ex))
         {
             return await HandleParameterMismatchAsync(request, maxTokensValue, ex);
@@ -388,6 +394,14 @@ public class OpenAIProvider : ICommitMessageProvider
         }
         catch (HttpResponseException ex)
         {
+            // Check if this is a context length error
+            if (ex.ResponseBody != null && 
+                (ex.ResponseBody.Contains(Constants.Api.ContextLengthExceededError) ||
+                 ex.ResponseBody.Contains("maximum context length")))
+            {
+                throw ContextLengthExceededException.ParseFromApiError(ex.ResponseBody, ex);
+            }
+
             // Check if this is an authentication error and throw specific exception
             if (ex.IsAuthenticationError || IsAuthenticationError(null, ex.ResponseBody ?? ""))
                 throw new AuthenticationException(Constants.ErrorMessages.AuthenticationFailed, ex);
@@ -452,9 +466,19 @@ public class OpenAIProvider : ICommitMessageProvider
                 ex.Message.Contains(Constants.Api.TemperatureParameter));
     }
 
-    private bool IsAuthenticationError(HttpRequestException ex, string errorContent)
+    private bool IsContextLengthError(HttpRequestException ex)
     {
-        if (ex.StatusCode == HttpStatusCode.Unauthorized)
+        if (ex.StatusCode != HttpStatusCode.BadRequest || ex.Message == null)
+            return false;
+
+        return ex.Message.Contains(Constants.Api.ContextLengthExceededError) ||
+               (ex.Message.Contains(Constants.Api.InvalidRequestError) && 
+                ex.Message.Contains("maximum context length"));
+    }
+
+    private bool IsAuthenticationError(HttpRequestException? ex, string errorContent)
+    {
+        if (ex?.StatusCode == HttpStatusCode.Unauthorized)
             return true;
 
         return errorContent.Contains(Constants.Api.InvalidApiKeyError) ||

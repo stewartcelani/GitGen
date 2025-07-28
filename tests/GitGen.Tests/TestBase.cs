@@ -1,4 +1,5 @@
 using System.IO.Abstractions.TestingHelpers;
+using GitGen.Configuration;
 using GitGen.Services;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -13,13 +14,24 @@ public abstract class TestBase : IDisposable
     protected IConsoleLogger Logger { get; }
     protected MockFileSystem FileSystem { get; }
     protected string TestDirectory { get; }
+    private bool _disposed;
 
     protected TestBase()
     {
         Logger = Substitute.For<IConsoleLogger>();
         FileSystem = new MockFileSystem();
         TestDirectory = Path.Combine(Path.GetTempPath(), "gitgen-tests", Guid.NewGuid().ToString());
+        
+        // Ensure test directory exists
+        Directory.CreateDirectory(TestDirectory);
+        
+        // Capture original console streams
+        OriginalOut = Console.Out;
+        OriginalIn = Console.In;
     }
+
+    protected TextWriter OriginalOut { get; }
+    protected TextReader OriginalIn { get; }
 
     /// <summary>
     /// Creates a service provider with test dependencies.
@@ -34,6 +46,7 @@ public abstract class TestBase : IDisposable
         {
             var factory = Substitute.For<ConsoleLoggerFactory>();
             factory.CreateLogger<object>().Returns(Logger);
+            factory.CreateLogger(Arg.Any<string>()).Returns(Logger);
             return factory;
         });
         
@@ -50,16 +63,60 @@ public abstract class TestBase : IDisposable
     {
         var fileName = $"{Guid.NewGuid()}{extension}";
         var filePath = Path.Combine(TestDirectory, fileName);
-        FileSystem.AddFile(filePath, new MockFileData(content));
+        File.WriteAllText(filePath, content);
         return filePath;
+    }
+
+    /// <summary>
+    /// Creates a test model configuration with reasonable defaults.
+    /// </summary>
+    protected ModelConfiguration CreateTestModel(string? name = null)
+    {
+        return new ModelConfiguration
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = name ?? "test-model",
+            Type = "openai-compatible",
+            Provider = "TestProvider",
+            Url = "https://api.test.com/v1/chat/completions",
+            ModelId = "test-model-id",
+            ApiKey = "test-key-123456789",
+            RequiresAuth = true,
+            Temperature = 0.2,
+            MaxOutputTokens = 2000
+        };
     }
 
     public virtual void Dispose()
     {
-        // Clean up test directory if it exists
-        if (Directory.Exists(TestDirectory))
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposed)
         {
-            Directory.Delete(TestDirectory, true);
+            if (disposing)
+            {
+                // Restore console streams
+                Console.SetOut(OriginalOut);
+                Console.SetIn(OriginalIn);
+                
+                // Clean up test directory if it exists
+                try
+                {
+                    if (Directory.Exists(TestDirectory))
+                    {
+                        Directory.Delete(TestDirectory, true);
+                    }
+                }
+                catch
+                {
+                    // Ignore cleanup errors in tests
+                }
+            }
+            _disposed = true;
         }
     }
 }

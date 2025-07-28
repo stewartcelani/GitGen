@@ -108,6 +108,10 @@ public static class Constants
         public const string EmptyCommitMessage =
             "Provider returned empty commit message (may have hit token limit during reasoning)";
 
+        // Context Length
+        public const string ContextLengthExceeded = "Context length exceeded";
+        public const string ContextLengthRetryPrompt = "Would you like to retry with a truncated diff? (y/N): ";
+
         // Model Change
         public const string ModelChangeFailed = "Failed to connect to model '{0}'. Model change cancelled.";
         public const string ModelChangeError = "Model change failed: {0}";
@@ -135,6 +139,7 @@ public static class Constants
         public const string IncorrectApiKeyError = "Incorrect API key provided";
         public const string InvalidApiKeyGeneric = "Invalid API key";
         public const string UnauthorizedError = "Unauthorized";
+        public const string ContextLengthExceededError = "context_length_exceeded";
 
         // Parameter Names
         public const string MaxTokensParameter = "max_tokens";

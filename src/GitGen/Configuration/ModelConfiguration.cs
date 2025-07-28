@@ -64,6 +64,12 @@ public class ModelConfiguration
     public int MaxOutputTokens { get; set; } = 5000;
 
     /// <summary>
+    ///     Gets or sets the context length (maximum input tokens) for this model.
+    ///     If not set, a conservative default will be used for truncation.
+    /// </summary>
+    public int? ContextLength { get; set; }
+
+    /// <summary>
     ///     Gets or sets when this model configuration was created.
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

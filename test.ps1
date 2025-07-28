@@ -3,7 +3,8 @@
 param(
     [string]$Filter = "",
     [switch]$Coverage,
-    [switch]$Watch
+    [switch]$Watch,
+    [switch]$Verbose
 )
 
 Write-Host "🧪 Running GitGen Tests" -ForegroundColor Magenta
@@ -13,7 +14,7 @@ $testProject = "tests/GitGen.Tests/GitGen.Tests.csproj"
 
 # Build the test project first
 Write-Host "📦 Building test project..." -ForegroundColor Cyan
-dotnet build $testProject -c Release --nologo --verbosity quiet
+dotnet build $testProject -c Release --nologo --verbosity quiet -nowarn:CS8604`;CS8625`;CS1998`;IL2026`;xUnit1012
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Build failed!" -ForegroundColor Red
@@ -22,6 +23,14 @@ if ($LASTEXITCODE -ne 0) {
 
 # Prepare test command
 $testArgs = @("test", $testProject, "-c", "Release", "--no-build", "--nologo")
+
+if ($Verbose) {
+    Write-Host "📋 Showing individual test results..." -ForegroundColor Yellow
+    $testArgs += "--verbosity"
+    $testArgs += "normal"
+    $testArgs += "--logger"
+    $testArgs += "console;verbosity=detailed"
+}
 
 if ($Filter) {
     Write-Host "🔍 Filter: $Filter" -ForegroundColor Yellow
