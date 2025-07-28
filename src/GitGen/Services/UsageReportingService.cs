@@ -76,7 +76,7 @@ public class UsageReportingService : IUsageReportingService
 
         var report = new StringBuilder();
         report.AppendLine($"GitGen Usage Report - {reportDate:yyyy-MM-dd}");
-        report.AppendLine(new string('=', 50));
+        report.AppendLine(new string('=', 70));
 
         if (!entries.Any())
         {
@@ -88,14 +88,15 @@ public class UsageReportingService : IUsageReportingService
         var modelGroups = entries.GroupBy(e => e.Model.Name).OrderByDescending(g => g.Count());
 
         report.AppendLine("\nUsage by Model:");
-        report.AppendLine(new string('-', 50));
-        report.AppendLine($"{"Model",-20} {"Calls",8} {"Input",10} {"Output",10} {"Total",10} {"Cost",10}");
-        report.AppendLine(new string('-', 50));
+        report.AppendLine("┌──────────────────────┬──────────┬────────────┬────────────┬────────────┬──────────┬────────────┐");
+        report.AppendLine("│ Model                │ Calls    │ Input      │ Output     │ Total      │ Avg Time │ Cost       │");
+        report.AppendLine("├──────────────────────┼──────────┼────────────┼────────────┼────────────┼──────────┼────────────┤");
 
         decimal totalCost = 0;
         int totalCalls = 0;
         int totalInputTokens = 0;
         int totalOutputTokens = 0;
+        double totalDuration = 0;
 
         foreach (var modelGroup in modelGroups)
         {
@@ -104,28 +105,31 @@ public class UsageReportingService : IUsageReportingService
             var outputTokens = modelGroup.Sum(e => e.Tokens.Output);
             var totalTokens = modelGroup.Sum(e => e.Tokens.Total);
             var cost = modelGroup.Where(e => e.Cost != null).Sum(e => e.Cost!.Amount);
+            var avgTime = modelGroup.Average(e => e.Duration);
             var currency = modelGroup.FirstOrDefault(e => e.Cost != null)?.Cost?.Currency ?? "USD";
 
             totalCalls += calls;
             totalInputTokens += inputTokens;
             totalOutputTokens += outputTokens;
             totalCost += cost;
+            totalDuration += modelGroup.Sum(e => e.Duration);
 
+            var modelName = TruncateString(modelGroup.Key, 20);
             var costStr = CostCalculationService.FormatCurrency(cost, currency);
-            report.AppendLine($"{modelGroup.Key,-20} {calls,8} {FormatTokenCount(inputTokens),10} {FormatTokenCount(outputTokens),10} {FormatTokenCount(totalTokens),10} {costStr,10}");
+            
+            report.AppendLine($"│ {modelName,-20} │ {calls,8:N0} │ {FormatTokenCount(inputTokens),10} │ {FormatTokenCount(outputTokens),10} │ {FormatTokenCount(totalTokens),10} │ {avgTime,8:F1}s │ {costStr,10} │");
         }
 
-        report.AppendLine(new string('-', 50));
+        report.AppendLine("├──────────────────────┼──────────┼────────────┼────────────┼────────────┼──────────┼────────────┤");
+        
+        var overallAvgTime = totalCalls > 0 ? totalDuration / totalCalls : 0;
         var totalCostStr = CostCalculationService.FormatCurrency(totalCost, "USD");
-        report.AppendLine($"{"TOTAL",-20} {totalCalls,8} {FormatTokenCount(totalInputTokens),10} {FormatTokenCount(totalOutputTokens),10} {FormatTokenCount(totalInputTokens + totalOutputTokens),10} {totalCostStr,10}");
+        report.AppendLine($"│ {"TOTAL",-20} │ {totalCalls,8:N0} │ {FormatTokenCount(totalInputTokens),10} │ {FormatTokenCount(totalOutputTokens),10} │ {FormatTokenCount(totalInputTokens + totalOutputTokens),10} │ {overallAvgTime,8:F1}s │ {totalCostStr,10} │");
+        report.AppendLine("└──────────────────────┴──────────┴────────────┴────────────┴────────────┴──────────┴────────────┘");
 
         // Add session summary
         var sessions = entries.GroupBy(e => e.SessionId).Count();
         report.AppendLine($"\nSessions: {sessions}");
-        
-        // Add average response time
-        var avgDuration = entries.Average(e => e.Duration);
-        report.AppendLine($"Average response time: {avgDuration:F1}s");
 
         return report.ToString();
     }
@@ -309,5 +313,12 @@ public class UsageReportingService : IUsageReportingService
             return $"{tokens / 1_000.0:F1}k";
         }
         return tokens.ToString();
+    }
+    
+    private static string TruncateString(string str, int maxLength)
+    {
+        if (str.Length <= maxLength)
+            return str;
+        return str.Substring(0, maxLength - 3) + "...";
     }
 }
