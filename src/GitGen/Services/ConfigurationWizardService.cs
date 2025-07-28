@@ -560,9 +560,20 @@ public class ConfigurationWizardService
         {
             case "1": // OpenAI
                 model.Url = Constants.Configuration.DefaultOpenAIBaseUrl;
-                // Extract and suggest domain as provider name
-                var openaiDomain = ValidationService.DomainExtractor.ExtractDomain(model.Url) ?? "openai.com";
-                model.Provider = Prompt($"Provider name [{openaiDomain}]:", openaiDomain);
+                
+                // Check if URL matches a known provider
+                var openAIProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
+                if (!string.IsNullOrEmpty(openAIProvider))
+                {
+                    model.Provider = openAIProvider;
+                    _logger.Information($"Provider name [{openAIProvider}]: {openAIProvider}");
+                }
+                else
+                {
+                    // Fallback to domain extraction if auto-detection fails
+                    var openaiDomain = ValidationService.DomainExtractor.ExtractDomain(model.Url) ?? "openai.com";
+                    model.Provider = Prompt($"Provider name [{openaiDomain}]:", openaiDomain);
+                }
                 model.ModelId = Prompt("Enter the model ID used by the provider's API (e.g., gpt-4-turbo):", Constants.Configuration.DefaultOpenAIModel);
                 model.ApiKey = PromptForApiKey("Enter your OpenAI API Key:", null);
                 model.RequiresAuth = true;
@@ -705,10 +716,10 @@ public class ConfigurationWizardService
         _logger.Information("");
         _logger.Information("");
         _logger.Information("");
-        _logger.Highlight("Step 8: Configure pricing information (optional).", ConsoleColor.Magenta);
+        _logger.Highlight("Step 8: Configure pricing information.", ConsoleColor.Magenta);
         _logger.Information("Enter costs per million tokens.");
 
-        model.Pricing = new PricingInfo();
+        // Pricing is already initialized in ModelConfiguration constructor
 
         // Currency
         _logger.Information("");
@@ -735,7 +746,7 @@ public class ConfigurationWizardService
         // Input cost
         while (true)
         {
-            var inputCostStr = Prompt("Input cost per million tokens [0]:", "0");
+            var inputCostStr = Prompt("Input cost per million tokens:");
             if (decimal.TryParse(inputCostStr, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var inputCost) && inputCost >= 0)
             {
                 model.Pricing.InputPer1M = inputCost;
@@ -747,7 +758,7 @@ public class ConfigurationWizardService
         // Output cost
         while (true)
         {
-            var outputCostStr = Prompt("Output cost per million tokens [0]:", "0");
+            var outputCostStr = Prompt("Output cost per million tokens:");
             if (decimal.TryParse(outputCostStr, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var outputCost) && outputCost >= 0)
             {
                 model.Pricing.OutputPer1M = outputCost;
@@ -803,16 +814,9 @@ public class ConfigurationWizardService
         _logger.Information($"   Max Tokens: {model.MaxOutputTokens}");
         
         // Display pricing with currency symbol
-        if (model.Pricing != null)
-        {
-            var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
-            _logger.Information($"   Pricing: {pricingInfo}");
-            _logger.Information($"   Currency: {model.Pricing.CurrencyCode} ({CostCalculationService.GetCurrencySymbol(model.Pricing.CurrencyCode)})");
-        }
-        else
-        {
-            _logger.Information($"   Pricing: Not configured");
-        }
+        var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+        _logger.Information($"   Pricing: {pricingInfo}");
+        _logger.Information($"   Currency: {model.Pricing.CurrencyCode} ({CostCalculationService.GetCurrencySymbol(model.Pricing.CurrencyCode)})");
         
         // Display system prompt
         if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
@@ -865,8 +869,7 @@ public class ConfigurationWizardService
         }
         
         // Check if pricing indicates it's free
-        if (model.Pricing != null && 
-            model.Pricing.InputPer1M == 0 && 
+        if (model.Pricing.InputPer1M == 0 && 
             model.Pricing.OutputPer1M == 0)
             return true;
         

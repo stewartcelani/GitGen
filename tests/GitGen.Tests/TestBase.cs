@@ -72,7 +72,7 @@ public abstract class TestBase : IDisposable
     /// </summary>
     protected ModelConfiguration CreateTestModel(string? name = null)
     {
-        return new ModelConfiguration
+        var model = new ModelConfiguration
         {
             Id = Guid.NewGuid().ToString(),
             Name = name ?? "test-model",
@@ -85,6 +85,13 @@ public abstract class TestBase : IDisposable
             Temperature = 0.2,
             MaxOutputTokens = 2000
         };
+        
+        // Set pricing values for tests
+        model.Pricing.InputPer1M = 10;
+        model.Pricing.OutputPer1M = 20;
+        model.Pricing.CurrencyCode = "USD";
+        
+        return model;
     }
 
     public virtual void Dispose()

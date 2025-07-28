@@ -21,6 +21,35 @@ public class SecureConfigurationServiceTests : TestBase
         _configPath = (string)field!.GetValue(_service)!;
     }
 
+    private ModelConfiguration CreateValidTestModel(string id, string name, List<string>? aliases = null)
+    {
+        var model = new ModelConfiguration
+        {
+            Id = id,
+            Name = name,
+            Type = "openai-compatible",
+            Provider = "TestProvider",
+            Url = "https://api.test.com/v1/chat/completions",
+            ModelId = "test-model-id",
+            ApiKey = "test-key-123456789",
+            RequiresAuth = true,
+            Temperature = 0.2,
+            MaxOutputTokens = 2000
+        };
+        
+        // Set pricing values
+        model.Pricing.InputPer1M = 10;
+        model.Pricing.OutputPer1M = 20;
+        model.Pricing.CurrencyCode = "USD";
+        
+        if (aliases != null)
+        {
+            model.Aliases = aliases;
+        }
+        
+        return model;
+    }
+
     [Fact]
     public async Task LoadSettingsAsync_WithNoConfigFile_ReturnsEmptySettings()
     {
@@ -43,30 +72,19 @@ public class SecureConfigurationServiceTests : TestBase
         // Arrange
         var originalSettings = new GitGenSettings
         {
-            Version = "2.0",
+            Version = Constants.Configuration.CurrentConfigVersion,
             DefaultModelId = "test-id",
             Models = new List<ModelConfiguration>
             {
-                new ModelConfiguration
-                {
-                    Id = "test-id",
-                    Name = "test-model",
-                    Type = "openai-compatible",
-                    Provider = "TestProvider",
-                    Url = "https://api.test.com",
-                    ModelId = "gpt-4",
-                    ApiKey = "test-key-12345",
-                    MaxOutputTokens = 2000,
-                    Temperature = 0.7,
-                    Aliases = new List<string> { "test", "demo" }
-                }
+                CreateValidTestModel("test-id", "test-model", new List<string> { "test", "demo" })
             },
             Settings = new AppSettings
             {
                 ShowTokenUsage = false,
                 CopyToClipboard = false,
                 EnablePartialAliasMatching = true,
-                MinimumAliasMatchLength = 3
+                MinimumAliasMatchLength = 3,
+                RequirePromptConfirmation = false
             }
         };
 
@@ -90,6 +108,7 @@ public class SecureConfigurationServiceTests : TestBase
         
         loadedSettings.Settings.ShowTokenUsage.Should().Be(false);
         loadedSettings.Settings.EnablePartialAliasMatching.Should().Be(true);
+        loadedSettings.Settings.RequirePromptConfirmation.Should().Be(false);
     }
 
     [Fact]
@@ -98,10 +117,11 @@ public class SecureConfigurationServiceTests : TestBase
         // Arrange
         var settings = new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             Models = new List<ModelConfiguration>
             {
-                new ModelConfiguration { Id = "1", Name = "gpt-4" },
-                new ModelConfiguration { Id = "2", Name = "claude-3" }
+                CreateValidTestModel("1", "gpt-4"),
+                CreateValidTestModel("2", "claude-3")
             }
         };
         await _service.SaveSettingsAsync(settings);
@@ -121,14 +141,10 @@ public class SecureConfigurationServiceTests : TestBase
         // Arrange
         var settings = new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             Models = new List<ModelConfiguration>
             {
-                new ModelConfiguration 
-                { 
-                    Id = "1", 
-                    Name = "gpt-4",
-                    Aliases = new List<string> { "fast", "quick" }
-                }
+                CreateValidTestModel("1", "gpt-4", new List<string> { "fast", "quick" })
             }
         };
         await _service.SaveSettingsAsync(settings);
@@ -148,12 +164,7 @@ public class SecureConfigurationServiceTests : TestBase
     public async Task AddModelAsync_WithUniqueModel_AddsSuccessfully()
     {
         // Arrange
-        var model = new ModelConfiguration
-        {
-            Id = "new-id",
-            Name = "new-model",
-            Type = "openai-compatible"
-        };
+        var model = CreateValidTestModel("new-id", "new-model");
 
         // Act
         await _service.AddModelAsync(model);
@@ -167,12 +178,7 @@ public class SecureConfigurationServiceTests : TestBase
     public async Task AddModelAsync_FirstModel_SetsAsDefault()
     {
         // Arrange
-        var model = new ModelConfiguration
-        {
-            Id = "first-id",
-            Name = "first-model",
-            Type = "openai-compatible"
-        };
+        var model = CreateValidTestModel("first-id", "first-model");
 
         // Act
         await _service.AddModelAsync(model);
@@ -188,11 +194,12 @@ public class SecureConfigurationServiceTests : TestBase
         // Arrange
         var settings = new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             DefaultModelId = "1",
             Models = new List<ModelConfiguration>
             {
-                new ModelConfiguration { Id = "1", Name = "model-1" },
-                new ModelConfiguration { Id = "2", Name = "model-2" }
+                CreateValidTestModel("1", "model-1"),
+                CreateValidTestModel("2", "model-2")
             }
         };
         await _service.SaveSettingsAsync(settings);
@@ -211,12 +218,7 @@ public class SecureConfigurationServiceTests : TestBase
     public async Task AddAliasAsync_AddsUniqueAlias()
     {
         // Arrange
-        var model = new ModelConfiguration
-        {
-            Id = "1",
-            Name = "test-model",
-            Type = "openai-compatible"
-        };
+        var model = CreateValidTestModel("1", "test-model");
         await _service.AddModelAsync(model);
 
         // Act
@@ -233,20 +235,11 @@ public class SecureConfigurationServiceTests : TestBase
         // Arrange
         var settings = new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             Models = new List<ModelConfiguration>
             {
-                new ModelConfiguration 
-                { 
-                    Id = "1", 
-                    Name = "model-1",
-                    Aliases = new List<string> { "ultrafast", "ultrasmart" }
-                },
-                new ModelConfiguration 
-                { 
-                    Id = "2", 
-                    Name = "model-2",
-                    Aliases = new List<string> { "fast" }
-                }
+                CreateValidTestModel("1", "model-1", new List<string> { "ultrafast", "ultrasmart" }),
+                CreateValidTestModel("2", "model-2", new List<string> { "fast" })
             },
             Settings = new AppSettings
             {
@@ -270,10 +263,11 @@ public class SecureConfigurationServiceTests : TestBase
         // Arrange
         var settings = new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             DefaultModelId = null,
             Models = new List<ModelConfiguration>
             {
-                new ModelConfiguration { Id = "1", Name = "only-model" }
+                CreateValidTestModel("1", "only-model")
             }
         };
         await _service.SaveSettingsAsync(settings);
@@ -285,6 +279,48 @@ public class SecureConfigurationServiceTests : TestBase
         // Assert
         healed.Should().BeTrue();
         updatedSettings.DefaultModelId.Should().Be("1");
+    }
+
+    [Fact]
+    public async Task LoadSettingsAsync_NewConfiguration_HasRequirePromptConfirmationTrue()
+    {
+        // Arrange
+        if (File.Exists(_configPath))
+            File.Delete(_configPath);
+
+        // Act
+        var settings = await _service.LoadSettingsAsync();
+
+        // Assert
+        settings.Should().NotBeNull();
+        settings.Settings.Should().NotBeNull();
+        settings.Settings.RequirePromptConfirmation.Should().BeTrue("new configurations should default to requiring confirmation for safety");
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_WithRequirePromptConfirmation_PersistsValue()
+    {
+        // Arrange
+        var settings = new GitGenSettings
+        {
+            Version = Constants.Configuration.CurrentConfigVersion,
+            Settings = new AppSettings
+            {
+                RequirePromptConfirmation = true
+            }
+        };
+
+        // Act
+        await _service.SaveSettingsAsync(settings);
+        
+        // Change it to false and save again
+        settings.Settings.RequirePromptConfirmation = false;
+        await _service.SaveSettingsAsync(settings);
+        
+        var loadedSettings = await _service.LoadSettingsAsync();
+
+        // Assert
+        loadedSettings.Settings.RequirePromptConfirmation.Should().BeFalse();
     }
 
     protected override void Dispose(bool disposing)

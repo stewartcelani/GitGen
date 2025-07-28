@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using GitGen.Configuration;
+using GitGen.Models;
 using GitGen.Providers;
+using LibGit2Sharp;
 
 namespace GitGen.Services;
 
@@ -39,12 +41,14 @@ public interface ILlmCallTracker
     /// <param name="prompt">The prompt being sent to the LLM</param>
     /// <param name="model">The model configuration being used</param>
     /// <param name="apiCall">The actual API call function</param>
+    /// <param name="indent">Optional indentation for display output</param>
     /// <returns>The result with timing information</returns>
     Task<LlmCallResult> TrackCallAsync(
         string operation,
         string prompt,
         ModelConfiguration? model,
-        Func<Task<CommitMessageResult>> apiCall);
+        Func<Task<CommitMessageResult>> apiCall,
+        string indent = "");
 }
 
 /// <summary>
@@ -53,31 +57,34 @@ public interface ILlmCallTracker
 public class LlmCallTracker : ILlmCallTracker
 {
     private readonly IConsoleLogger _logger;
+    private readonly IUsageTrackingService _usageTracking;
     
-    public LlmCallTracker(IConsoleLogger logger)
+    public LlmCallTracker(IConsoleLogger logger, IUsageTrackingService usageTracking)
     {
         _logger = logger;
+        _usageTracking = usageTracking;
     }
     
     public async Task<LlmCallResult> TrackCallAsync(
         string operation,
         string prompt,
         ModelConfiguration? model,
-        Func<Task<CommitMessageResult>> apiCall)
+        Func<Task<CommitMessageResult>> apiCall,
+        string indent = "")
     {
         // Log what we're doing
-        _logger.Debug($"🤖 {operation}");
-        _logger.Debug($"Model: {model?.Name ?? "Unknown"} ({model?.ModelId ?? "Unknown"})");
-        _logger.Debug($"Prompt length: {prompt.Length} characters");
+        _logger.Debug($"{indent}🤖 {operation}");
+        _logger.Debug($"{indent}Model: {model?.Name ?? "Unknown"} ({model?.ModelId ?? "Unknown"})");
+        _logger.Debug($"{indent}Prompt length: {prompt.Length} characters");
         
         // Show truncated prompt in debug mode
         if (prompt.Length > 200)
         {
-            _logger.Debug($"Prompt preview: {prompt.Substring(0, 200)}...");
+            _logger.Debug($"{indent}Prompt preview: {prompt.Substring(0, 200)}...");
         }
         else
         {
-            _logger.Debug($"Prompt: {prompt}");
+            _logger.Debug($"{indent}Prompt: {prompt}");
         }
         
         // Start timing
@@ -102,19 +109,22 @@ public class LlmCallTracker : ILlmCallTracker
             };
             
             // Display the results
-            DisplayCallResult(operation, llmResult);
+            DisplayCallResult(operation, llmResult, indent);
+            
+            // Record usage
+            await RecordUsageAsync(llmResult);
             
             return llmResult;
         }
         catch (Exception)
         {
             stopwatch.Stop();
-            _logger.Error($"🤖❌ {operation} failed after {stopwatch.Elapsed.TotalSeconds:F1}s");
+            _logger.Error($"{indent}🤖❌ {operation} failed after {stopwatch.Elapsed.TotalSeconds:F1}s");
             throw;
         }
     }
     
-    private void DisplayCallResult(string operation, LlmCallResult result)
+    private void DisplayCallResult(string operation, LlmCallResult result, string indent = "")
     {
         // Build the status line
         var statusParts = new List<string>();
@@ -144,16 +154,82 @@ public class LlmCallTracker : ILlmCallTracker
         
         // Display the status line
         var statusLine = string.Join(" • ", statusParts);
-        _logger.Muted($"📊 {statusLine}");
+        _logger.Muted($"{indent}📊 {statusLine}");
         
         // In debug mode, show response preview
         if (result.Message.Length > 100)
         {
-            _logger.Debug($"Response preview: {result.Message.Substring(0, 100)}...");
+            _logger.Debug($"{indent}Response preview: {result.Message.Substring(0, 100)}...");
         }
         else if (!string.IsNullOrWhiteSpace(result.Message))
         {
-            _logger.Debug($"Response: {result.Message}");
+            _logger.Debug($"{indent}Response: {result.Message}");
+        }
+    }
+    
+    private async Task RecordUsageAsync(LlmCallResult result)
+    {
+        try
+        {
+            // Get git repository information
+            string? projectPath = null;
+            string? gitBranch = null;
+            
+            try
+            {
+                projectPath = Directory.GetCurrentDirectory();
+                using var repo = new Repository(projectPath);
+                gitBranch = repo.Head.FriendlyName;
+            }
+            catch
+            {
+                // Ignore git errors - not all projects are git repositories
+            }
+            
+            // Create usage entry
+            var entry = new UsageEntry
+            {
+                Timestamp = DateTime.UtcNow,
+                SessionId = _usageTracking.GetSessionId(),
+                Model = new ModelInfo
+                {
+                    Name = result.Model?.Name ?? "Unknown",
+                    Provider = result.Model?.Provider ?? "Unknown",
+                    ModelId = result.Model?.ModelId ?? "Unknown"
+                },
+                Tokens = new TokenUsage
+                {
+                    Input = result.InputTokens ?? 0,
+                    Output = result.OutputTokens ?? 0,
+                    Total = result.TotalTokens ?? 0
+                },
+                Operation = "commit_message_generation",
+                Duration = result.ElapsedTime.TotalSeconds,
+                Success = true,
+                ProjectPath = projectPath,
+                GitBranch = gitBranch
+            };
+            
+            // Add cost information if available
+            if (result.Model?.Pricing != null && result.InputTokens.HasValue && result.OutputTokens.HasValue)
+            {
+                var inputCost = (result.InputTokens.Value / 1_000_000m) * result.Model.Pricing.InputPer1M;
+                var outputCost = (result.OutputTokens.Value / 1_000_000m) * result.Model.Pricing.OutputPer1M;
+                var totalCost = inputCost + outputCost;
+                
+                entry.Cost = new CostInfo
+                {
+                    Amount = totalCost,
+                    Currency = result.Model.Pricing.CurrencyCode
+                };
+            }
+            
+            // Record the usage
+            await _usageTracking.RecordUsageAsync(entry);
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"Failed to record usage: {ex.Message}");
         }
     }
 }

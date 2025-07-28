@@ -1,7 +1,11 @@
 using GitGen.Configuration;
 using GitGen.Helpers;
+using GitGen.Models;
 using GitGen.Providers;
+using GitGen.Providers.OpenAI;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GitGen.Services;
 
@@ -67,6 +71,9 @@ public class ConfigurationMenuService
                 case "":
                 case null:
                     return;
+                case "9": // Hidden debug option
+                    await DiagnosticDump();
+                    break;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
                     await Task.Delay(1500);
@@ -202,11 +209,8 @@ public class ConfigurationMenuService
                     _logger.Muted($"    Aliases: {aliasesStr}");
                 }
                 
-                if (model.Pricing != null)
-                {
-                    var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
-                    _logger.Muted($"    Pricing: {pricingInfo}");
-                }
+                var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+                _logger.Muted($"    Pricing: {pricingInfo}");
                 
                 _logger.Muted($"    Last used: {lastUsed}");
                 Console.WriteLine();
@@ -342,6 +346,9 @@ public class ConfigurationMenuService
                 _logger.Muted($"    Aliases: {aliasesStr}");
             }
             
+            var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+            _logger.Muted($"    Pricing: {pricingInfo}");
+            
             var lastUsed = DateTimeHelper.ToLocalDateTimeString(model.LastUsed);
             _logger.Muted($"    Last used: {lastUsed}");
             
@@ -350,7 +357,8 @@ public class ConfigurationMenuService
             _logger.Information("1. Manage aliases");
             _logger.Information("2. Change max output tokens");
             _logger.Information("3. Update note/description");
-            _logger.Information("4. Test this model");
+            _logger.Information("4. Edit pricing");
+            _logger.Information("5. Test this model");
             _logger.Information("0. Back to model management");
             
             Console.WriteLine();
@@ -370,6 +378,9 @@ public class ConfigurationMenuService
                     await UpdateNote(model);
                     break;
                 case "4":
+                    await EditPricing(model);
+                    break;
+                case "5":
                     await TestSingleModelFromMenu(model);
                     break;
                 case "0":
@@ -503,6 +514,172 @@ public class ConfigurationMenuService
         await _secureConfig.UpdateModelAsync(model);
         
         _logger.Success($"{Constants.UI.CheckMark} Note updated");
+        await Task.Delay(1500);
+    }
+    
+    private async Task EditPricing(ModelConfiguration model)
+    {
+        Console.Clear();
+        _logger.Information($"═══ Edit Pricing: {model.Name} ═══");
+        Console.WriteLine();
+        
+        // Display current pricing
+        var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+        _logger.Information($"Current pricing: {pricingInfo}");
+        _logger.Information($"Currency: {model.Pricing.CurrencyCode} ({CostCalculationService.GetCurrencySymbol(model.Pricing.CurrencyCode)})");
+        Console.WriteLine();
+        
+        _logger.Information("1. Change currency");
+        _logger.Information("2. Update input cost per million tokens");
+        _logger.Information("3. Update output cost per million tokens");
+        _logger.Information("4. Update all pricing values");
+        _logger.Information("0. Back");
+        
+        Console.WriteLine();
+        Console.Write("Select option: ");
+        
+        var choice = Console.ReadLine()?.Trim();
+        
+        switch (choice)
+        {
+            case "1":
+                await ChangeCurrency(model);
+                break;
+            case "2":
+                await ChangeInputCost(model);
+                break;
+            case "3":
+                await ChangeOutputCost(model);
+                break;
+            case "4":
+                await ChangeAllPricing(model);
+                break;
+            case "0":
+            case "":
+            case null:
+                return;
+            default:
+                _logger.Warning("Invalid choice. Please try again.");
+                await Task.Delay(1500);
+                break;
+        }
+    }
+    
+    private async Task ChangeCurrency(ModelConfiguration model)
+    {
+        Console.WriteLine();
+        _logger.Information("Select currency:");
+        _logger.Information("  1. USD ($)");
+        _logger.Information("  2. EUR (€)");
+        _logger.Information("  3. GBP (£)");
+        _logger.Information("  4. AUD (A$)");
+        _logger.Information("  5. Other");
+        
+        Console.Write("Enter your choice: ");
+        var currencyChoice = Console.ReadLine()?.Trim();
+        
+        switch (currencyChoice)
+        {
+            case "1": model.Pricing.CurrencyCode = "USD"; break;
+            case "2": model.Pricing.CurrencyCode = "EUR"; break;
+            case "3": model.Pricing.CurrencyCode = "GBP"; break;
+            case "4": model.Pricing.CurrencyCode = "AUD"; break;
+            case "5":
+                Console.Write("Enter currency code (e.g., JPY): ");
+                var customCurrency = Console.ReadLine()?.Trim().ToUpper();
+                if (!string.IsNullOrWhiteSpace(customCurrency) && customCurrency.Length == 3 && customCurrency.All(char.IsLetter))
+                {
+                    model.Pricing.CurrencyCode = customCurrency;
+                }
+                else
+                {
+                    _logger.Warning("Invalid currency code. Must be a 3-letter code.");
+                    await Task.Delay(1500);
+                    return;
+                }
+                break;
+            default:
+                return;
+        }
+        
+        model.Pricing.UpdatedAt = DateTime.UtcNow;
+        await _secureConfig.UpdateModelAsync(model);
+        _logger.Success($"{Constants.UI.CheckMark} Currency updated to {model.Pricing.CurrencyCode}");
+        await Task.Delay(1500);
+    }
+    
+    private async Task ChangeInputCost(ModelConfiguration model)
+    {
+        Console.WriteLine();
+        Console.Write($"Enter new input cost per million tokens (current: {model.Pricing.InputPer1M}): ");
+        var input = Console.ReadLine();
+        
+        if (!string.IsNullOrWhiteSpace(input) && decimal.TryParse(input, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out decimal newCost) && newCost >= 0)
+        {
+            model.Pricing.InputPer1M = newCost;
+            model.Pricing.UpdatedAt = DateTime.UtcNow;
+            await _secureConfig.UpdateModelAsync(model);
+            _logger.Success($"{Constants.UI.CheckMark} Input cost updated to {newCost}");
+        }
+        else
+        {
+            _logger.Warning("Invalid input cost. Must be a non-negative number.");
+        }
+        
+        await Task.Delay(1500);
+    }
+    
+    private async Task ChangeOutputCost(ModelConfiguration model)
+    {
+        Console.WriteLine();
+        Console.Write($"Enter new output cost per million tokens (current: {model.Pricing.OutputPer1M}): ");
+        var input = Console.ReadLine();
+        
+        if (!string.IsNullOrWhiteSpace(input) && decimal.TryParse(input, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out decimal newCost) && newCost >= 0)
+        {
+            model.Pricing.OutputPer1M = newCost;
+            model.Pricing.UpdatedAt = DateTime.UtcNow;
+            await _secureConfig.UpdateModelAsync(model);
+            _logger.Success($"{Constants.UI.CheckMark} Output cost updated to {newCost}");
+        }
+        else
+        {
+            _logger.Warning("Invalid output cost. Must be a non-negative number.");
+        }
+        
+        await Task.Delay(1500);
+    }
+    
+    private async Task ChangeAllPricing(ModelConfiguration model)
+    {
+        Console.WriteLine();
+        
+        // Input cost
+        Console.Write("Enter input cost per million tokens: ");
+        var inputCostStr = Console.ReadLine();
+        if (!decimal.TryParse(inputCostStr, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out decimal inputCost) || inputCost < 0)
+        {
+            _logger.Warning("Invalid input cost. Must be a non-negative number.");
+            await Task.Delay(1500);
+            return;
+        }
+        
+        // Output cost
+        Console.Write("Enter output cost per million tokens: ");
+        var outputCostStr = Console.ReadLine();
+        if (!decimal.TryParse(outputCostStr, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out decimal outputCost) || outputCost < 0)
+        {
+            _logger.Warning("Invalid output cost. Must be a non-negative number.");
+            await Task.Delay(1500);
+            return;
+        }
+        
+        model.Pricing.InputPer1M = inputCost;
+        model.Pricing.OutputPer1M = outputCost;
+        model.Pricing.UpdatedAt = DateTime.UtcNow;
+        await _secureConfig.UpdateModelAsync(model);
+        
+        _logger.Success($"{Constants.UI.CheckMark} Pricing updated");
         await Task.Delay(1500);
     }
     
@@ -884,7 +1061,7 @@ public class ConfigurationMenuService
             // Test the connection
             try
             {
-                var provider = _providerFactory.CreateProvider(model);
+                var provider = CreateProviderWithIndent(model, indent);
                 _logger.Information($"{indent}  {Constants.UI.TestTubeSymbol} Testing connection...");
                 
                 var result = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
@@ -902,6 +1079,67 @@ public class ConfigurationMenuService
             _logger.Error($"{indent}  {Constants.UI.CrossMark} Error: {ex.Message}");
             return false;
         }
+    }
+    
+    private ICommitMessageProvider CreateProviderWithIndent(ModelConfiguration model, string indent)
+    {
+        // Create a custom LlmCallTracker with the indent
+        var indentedCallTracker = new LlmCallTrackerWithIndent(_logger, indent);
+        
+        // Create the provider with the custom tracker
+        var type = model.Type?.ToLowerInvariant();
+        return type switch
+        {
+            "openai" => new OpenAIProvider(
+                new HttpClientService(_logger),
+                _logger,
+                model,
+                indentedCallTracker),
+            "openai-compatible" => new OpenAIProvider(
+                new HttpClientService(_logger),
+                _logger,
+                model,
+                indentedCallTracker),
+            _ => throw new NotSupportedException(
+                $"API type '{model.Type}' is not supported. Supported types: openai, openai-compatible")
+        };
+    }
+    
+    /// <summary>
+    /// A wrapper for LlmCallTracker that adds indentation to all output.
+    /// </summary>
+    private class LlmCallTrackerWithIndent : ILlmCallTracker
+    {
+        private readonly IConsoleLogger _logger;
+        private readonly string _indent;
+        
+        public LlmCallTrackerWithIndent(IConsoleLogger logger, string indent)
+        {
+            _logger = logger;
+            _indent = indent;
+        }
+        
+        public async Task<LlmCallResult> TrackCallAsync(
+            string operation,
+            string prompt,
+            ModelConfiguration? model,
+            Func<Task<CommitMessageResult>> apiCall,
+            string indent = "")
+        {
+            // Use our configured indent, ignoring the passed indent parameter
+            // For configuration testing, we don't need usage tracking
+            var tracker = new LlmCallTracker(_logger, new NullUsageTrackingService());
+            return await tracker.TrackCallAsync(operation, prompt, model, apiCall, _indent);
+        }
+    }
+    
+    /// <summary>
+    ///     Null implementation of IUsageTrackingService for testing purposes.
+    /// </summary>
+    private class NullUsageTrackingService : IUsageTrackingService
+    {
+        public Task RecordUsageAsync(UsageEntry entry) => Task.CompletedTask;
+        public string GetSessionId() => "test-session";
     }
     
     /// <summary>
@@ -939,22 +1177,89 @@ public class ConfigurationMenuService
         }
         
         // Check if pricing indicates it's free
-        if (model.Pricing != null && 
-            model.Pricing.InputPer1M == 0 && 
+        if (model.Pricing.InputPer1M == 0 && 
             model.Pricing.OutputPer1M == 0)
             return true;
         
         return false;
     }
     
-    private async Task TogglePromptConfirmation()
+    private async Task DiagnosticDump()
     {
-        var settings = await _secureConfig.LoadSettingsAsync();
-        settings.Settings.RequirePromptConfirmation = !settings.Settings.RequirePromptConfirmation;
-        await _secureConfig.SaveSettingsAsync(settings);
+        Console.Clear();
+        _logger.Information("=== Configuration Diagnostic Dump ===");
         
-        var status = settings.Settings.RequirePromptConfirmation ? "enabled" : "disabled";
-        _logger.Success($"{Constants.UI.CheckMark} Prompt confirmation {status}");
-        await Task.Delay(1500);
+        try
+        {
+            // Try to load settings
+            var settings = await _secureConfig.LoadSettingsAsync();
+            
+            // Serialize to JSON for inspection
+            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions 
+            { 
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            });
+            
+            _logger.Information("Current settings JSON:");
+            Console.WriteLine(json);
+            
+            // Check file system
+            var configPath = settings.Settings?.ConfigPath ?? "Unknown";
+            _logger.Information($"\nConfiguration path: {configPath}");
+            
+            if (File.Exists(configPath))
+            {
+                var fileInfo = new FileInfo(configPath);
+                _logger.Information($"File exists: Yes");
+                _logger.Information($"File size: {fileInfo.Length} bytes");
+                _logger.Information($"Last modified: {fileInfo.LastWriteTime}");
+            }
+            else
+            {
+                _logger.Warning("File exists: No");
+            }
+            
+            // Try to save a test configuration
+            _logger.Information("\nAttempting test save...");
+            
+            // Add a timestamp to verify save/load cycle
+            if (settings.Settings == null)
+                settings.Settings = new AppSettings();
+                
+            // Save current state first
+            var originalShowToken = settings.Settings.ShowTokenUsage;
+            
+            // Toggle a setting to verify it saves
+            settings.Settings.ShowTokenUsage = !settings.Settings.ShowTokenUsage;
+            await _secureConfig.SaveSettingsAsync(settings);
+            _logger.Success("Test save completed");
+            
+            // Clear cache by creating new instance (simulate app restart)
+            var newService = new SecureConfigurationService(_logger);
+            
+            // Try to reload
+            _logger.Information("\nAttempting reload with new service instance...");
+            var reloaded = await newService.LoadSettingsAsync();
+            _logger.Success($"Reload successful");
+            _logger.Information($"ShowTokenUsage changed from {originalShowToken} to {reloaded.Settings?.ShowTokenUsage}");
+            
+            // Restore original value
+            if (reloaded.Settings != null)
+            {
+                reloaded.Settings.ShowTokenUsage = originalShowToken;
+                await newService.SaveSettingsAsync(reloaded);
+                _logger.Information("Restored original setting value");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Diagnostic failed: {ex.Message}");
+            _logger.Error($"Exception type: {ex.GetType().FullName}");
+            _logger.Error($"Stack trace: {ex.StackTrace}");
+        }
+        
+        Console.WriteLine("\nPress any key to continue...");
+        Console.ReadKey(true);
     }
 }

@@ -31,8 +31,12 @@ public class ProviderFactory
     /// <param name="modelConfig">The model configuration containing provider type and settings.</param>
     /// <returns>An instance of the appropriate <see cref="ICommitMessageProvider" />.</returns>
     /// <exception cref="NotSupportedException">Thrown when the provider type is not supported.</exception>
-    public ICommitMessageProvider CreateProvider(ModelConfiguration modelConfig)
+    public virtual ICommitMessageProvider CreateProvider(ModelConfiguration modelConfig)
     {
+        // Handle null case for test mocking scenarios
+        if (modelConfig == null)
+            return null!;
+            
         var type = modelConfig.Type?.ToLowerInvariant();
 
         return type switch

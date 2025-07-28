@@ -30,15 +30,13 @@ public class ConfigurationWizardServiceTests : TestBase
     public async Task QuickChangeMaxTokens_WithSingleModel_UpdatesTokens()
     {
         // Arrange
-        var model = new ModelConfiguration
-        {
-            Id = "1",
-            Name = "test-model",
-            MaxOutputTokens = 1000
-        };
+        var model = CreateTestModel("test-model");
+        model.Id = "1";
+        model.MaxOutputTokens = 1000;
         
         _secureConfig.LoadSettingsAsync().Returns(new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             Models = new List<ModelConfiguration> { model }
         });
 
@@ -59,16 +57,13 @@ public class ConfigurationWizardServiceTests : TestBase
     public async Task QuickChangeModel_TestsNewModelBeforeApplying()
     {
         // Arrange
-        var model = new ModelConfiguration
-        {
-            Id = "1",
-            Name = "test-model",
-            ModelId = "gpt-4",
-            Type = "openai-compatible"
-        };
+        var model = CreateTestModel("test-model");
+        model.Id = "1";
+        model.ModelId = "gpt-4";
         
         _secureConfig.LoadSettingsAsync().Returns(new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             Models = new List<ModelConfiguration> { model }
         });
 
@@ -93,16 +88,13 @@ public class ConfigurationWizardServiceTests : TestBase
     public async Task QuickChangeModel_WithFailedTest_RevertsChange()
     {
         // Arrange
-        var model = new ModelConfiguration
-        {
-            Id = "1",
-            Name = "test-model",
-            ModelId = "gpt-4",
-            Type = "openai-compatible"
-        };
+        var model = CreateTestModel("test-model");
+        model.Id = "1";
+        model.ModelId = "gpt-4";
         
         _secureConfig.LoadSettingsAsync().Returns(new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             Models = new List<ModelConfiguration> { model }
         });
 

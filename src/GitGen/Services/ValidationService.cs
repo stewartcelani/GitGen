@@ -1,3 +1,5 @@
+using GitGen.Configuration;
+
 namespace GitGen.Services;
 
 /// <summary>
@@ -358,6 +360,62 @@ public static class ValidationService
 
             return
                 $"Unsupported provider type: {providerType}. Currently supported: {Constants.Configuration.ProviderTypeOpenAI}";
+        }
+    }
+
+    /// <summary>
+    ///     Validation methods for pricing information.
+    /// </summary>
+    public static class Pricing
+    {
+        /// <summary>
+        ///     Validates if pricing information is acceptable.
+        /// </summary>
+        /// <param name="pricing">The pricing info to validate</param>
+        /// <returns>True if the pricing is valid</returns>
+        public static bool IsValid(PricingInfo? pricing)
+        {
+            if (pricing == null)
+                return false;
+
+            // Input and output costs must be non-negative
+            if (pricing.InputPer1M < 0 || pricing.OutputPer1M < 0)
+                return false;
+
+            // Currency code must be present and valid
+            if (string.IsNullOrWhiteSpace(pricing.CurrencyCode))
+                return false;
+
+            // Currency code should be 3 letters (ISO 4217)
+            if (pricing.CurrencyCode.Length != 3 || !pricing.CurrencyCode.All(char.IsLetter))
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
+        ///     Gets validation error message for invalid pricing.
+        /// </summary>
+        /// <param name="pricing">The invalid pricing info</param>
+        /// <returns>Descriptive error message</returns>
+        public static string GetValidationError(PricingInfo? pricing)
+        {
+            if (pricing == null)
+                return "Pricing information is required";
+
+            if (pricing.InputPer1M < 0)
+                return "Input cost per million tokens cannot be negative";
+
+            if (pricing.OutputPer1M < 0)
+                return "Output cost per million tokens cannot be negative";
+
+            if (string.IsNullOrWhiteSpace(pricing.CurrencyCode))
+                return "Currency code is required";
+
+            if (pricing.CurrencyCode.Length != 3 || !pricing.CurrencyCode.All(char.IsLetter))
+                return "Currency code must be a 3-letter code (e.g., USD, EUR)";
+
+            return "Pricing information is invalid";
         }
     }
 

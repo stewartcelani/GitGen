@@ -46,7 +46,10 @@ public class SecureConfigurationService : ISecureConfigurationService
     public async Task<GitGenSettings> LoadSettingsAsync()
     {
         if (_cachedSettings != null)
+        {
+            _logger.Debug("Returning cached settings");
             return _cachedSettings;
+        }
 
         if (!File.Exists(_configPath))
         {
@@ -60,28 +63,108 @@ public class SecureConfigurationService : ISecureConfigurationService
 
         try
         {
+            _logger.Debug("Loading configuration from {Path}", _configPath);
             var fileContent = await File.ReadAllTextAsync(_configPath);
+            _logger.Debug("File content length: {Length} bytes", fileContent.Length);
             
             // Try to decrypt first (normal case)
             try
             {
+                _logger.Debug("Attempting to decrypt configuration");
                 var jsonData = _protector.Unprotect(fileContent);
-                _cachedSettings = JsonSerializer.Deserialize(jsonData, ConfigurationJsonContext.Default.GitGenSettings) 
-                    ?? new GitGenSettings();
+                _logger.Debug("Decrypted JSON length: {Length} characters", jsonData.Length);
+                
+                // Log first 200 chars of JSON for debugging
+                var preview = jsonData.Length > 200 ? jsonData.Substring(0, 200) + "..." : jsonData;
+                _logger.Debug("JSON preview: {Preview}", preview);
+                
+                _cachedSettings = JsonSerializer.Deserialize(jsonData, ConfigurationJsonContext.Default.GitGenSettings);
+                
+                if (_cachedSettings == null)
+                {
+                    _logger.Error("Deserialization returned null");
+                    return new GitGenSettings 
+                    { 
+                        Settings = new AppSettings { ConfigPath = _configPath } 
+                    };
+                }
+                
+                _logger.Debug("Successfully deserialized settings with {Count} models", _cachedSettings.Models?.Count ?? 0);
+                
+                // Version check immediately after deserialization
+                if (_cachedSettings.Version != Constants.Configuration.CurrentConfigVersion)
+                {
+                    _logger.Debug("Configuration version mismatch. Found: {Found}, Expected: {Expected}", 
+                        _cachedSettings.Version, Constants.Configuration.CurrentConfigVersion);
+                    _logger.Debug("Wiping old configuration for fresh setup");
+                    
+                    // Delete the config file
+                    try
+                    {
+                        File.Delete(_configPath);
+                    }
+                    catch (Exception deleteEx)
+                    {
+                        _logger.Debug("Failed to delete old config file: {Message}", deleteEx.Message);
+                    }
+                    
+                    // Return empty settings without caching
+                    _cachedSettings = null;
+                    return new GitGenSettings 
+                    { 
+                        Settings = new AppSettings { ConfigPath = _configPath } 
+                    };
+                }
             }
             catch (Exception decryptEx)
             {
-                _logger.Debug("Failed to decrypt configuration, trying as plain JSON: {Message}", decryptEx.Message);
+                _logger.Debug("Decryption failed: {Message}", decryptEx.Message);
+                _logger.Debug("Exception type: {Type}", decryptEx.GetType().FullName);
                 
                 // Fallback: try to read as unencrypted JSON (for debugging or recovery)
                 try
                 {
-                    _cachedSettings = JsonSerializer.Deserialize(fileContent, ConfigurationJsonContext.Default.GitGenSettings) 
-                        ?? new GitGenSettings();
+                    _logger.Debug("Attempting to read as plain JSON");
+                    _cachedSettings = JsonSerializer.Deserialize(fileContent, ConfigurationJsonContext.Default.GitGenSettings);
+                    
+                    if (_cachedSettings == null)
+                    {
+                        _logger.Error("Plain JSON deserialization returned null");
+                        throw new InvalidOperationException("Deserialization returned null");
+                    }
+                    
                     _logger.Warning("Loaded unencrypted configuration - will re-encrypt on next save");
+                    
+                    // Version check for plain JSON path too
+                    if (_cachedSettings.Version != Constants.Configuration.CurrentConfigVersion)
+                    {
+                        _logger.Debug("Plain JSON configuration version mismatch. Found: {Found}, Expected: {Expected}", 
+                            _cachedSettings.Version, Constants.Configuration.CurrentConfigVersion);
+                        _logger.Debug("Wiping old configuration for fresh setup");
+                        
+                        // Delete the config file
+                        try
+                        {
+                            File.Delete(_configPath);
+                        }
+                        catch (Exception deleteEx)
+                        {
+                            _logger.Debug("Failed to delete old config file: {Message}", deleteEx.Message);
+                        }
+                        
+                        // Return empty settings without caching
+                        _cachedSettings = null;
+                        return new GitGenSettings 
+                        { 
+                            Settings = new AppSettings { ConfigPath = _configPath } 
+                        };
+                    }
                 }
-                catch
+                catch (Exception jsonEx)
                 {
+                    _logger.Error("Plain JSON deserialization also failed: {Message}", jsonEx.Message);
+                    _logger.Debug("JSON Exception type: {Type}", jsonEx.GetType().FullName);
+                    
                     // If both decryption and plain JSON fail, it's corrupted
                     _logger.Error("Configuration file is corrupted and cannot be loaded");
                     
@@ -100,7 +183,10 @@ public class SecureConfigurationService : ISecureConfigurationService
             
             // Ensure settings object exists
             if (_cachedSettings.Settings == null)
+            {
+                _logger.Debug("Settings object was null, creating new instance");
                 _cachedSettings.Settings = new AppSettings();
+            }
             
             _cachedSettings.Settings.ConfigPath = _configPath;
             
@@ -111,11 +197,14 @@ public class SecureConfigurationService : ISecureConfigurationService
                     _cachedSettings.DefaultModelId ?? "(none)",
                     _cachedSettings.Models.FirstOrDefault()?.Name ?? "(none)");
             }
+            
+            _logger.Debug("Configuration loaded successfully");
             return _cachedSettings;
         }
         catch (Exception ex)
         {
             _logger.Error(ex, "Failed to read configuration file from {Path}", _configPath);
+            _logger.Error("Exception details: {Details}", ex.ToString());
             // Return empty settings without caching on error
             return new GitGenSettings 
             { 
@@ -129,13 +218,51 @@ public class SecureConfigurationService : ISecureConfigurationService
     {
         try
         {
+            _logger.Debug("SaveSettingsAsync called with {ModelCount} models", settings.Models?.Count ?? 0);
+            
             var jsonData = JsonSerializer.Serialize(settings, ConfigurationJsonContext.Default.GitGenSettings);
+            _logger.Debug("Serialized JSON length: {Length} characters", jsonData.Length);
+            
+            // Log first 200 chars for debugging
+            var preview = jsonData.Length > 200 ? jsonData.Substring(0, 200) + "..." : jsonData;
+            _logger.Debug("JSON preview: {Preview}", preview);
+            
             var encryptedData = _protector.Protect(jsonData);
+            _logger.Debug("Encrypted data length: {Length} bytes", encryptedData.Length);
+            
+            // Ensure directory exists
+            var directory = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                _logger.Debug("Creating directory: {Directory}", directory);
+                Directory.CreateDirectory(directory);
+            }
             
             // Write atomically using temp file
             var tempPath = _configPath + ".tmp";
+            _logger.Debug("Writing to temp file: {Path}", tempPath);
             await File.WriteAllTextAsync(tempPath, encryptedData);
+            
+            // Verify temp file was written
+            if (!File.Exists(tempPath))
+            {
+                throw new InvalidOperationException($"Temp file was not created at {tempPath}");
+            }
+            
+            var tempFileSize = new FileInfo(tempPath).Length;
+            _logger.Debug("Temp file size: {Size} bytes", tempFileSize);
+            
+            _logger.Debug("Moving temp file to final location: {Path}", _configPath);
             File.Move(tempPath, _configPath, true);
+            
+            // Verify final file exists
+            if (!File.Exists(_configPath))
+            {
+                throw new InvalidOperationException($"Configuration file was not created at {_configPath}");
+            }
+            
+            var finalFileSize = new FileInfo(_configPath).Length;
+            _logger.Debug("Final file size: {Size} bytes", finalFileSize);
             
             _cachedSettings = settings;
             _logger.Debug("Configuration saved successfully to {Path}", _configPath);
@@ -146,6 +273,8 @@ public class SecureConfigurationService : ISecureConfigurationService
         catch (Exception ex)
         {
             _logger.Error(ex, "Failed to save configuration to {Path}", _configPath);
+            _logger.Error("Exception type: {Type}", ex.GetType().FullName);
+            _logger.Error("Exception details: {Details}", ex.ToString());
             throw new InvalidOperationException($"Failed to save configuration: {ex.Message}", ex);
         }
     }

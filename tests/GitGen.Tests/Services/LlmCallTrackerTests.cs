@@ -1,5 +1,6 @@
 using FluentAssertions;
 using GitGen.Configuration;
+using GitGen.Models;
 using GitGen.Providers;
 using GitGen.Services;
 using NSubstitute;
@@ -10,10 +11,13 @@ namespace GitGen.Tests.Services;
 public class LlmCallTrackerTests : TestBase
 {
     private readonly LlmCallTracker _tracker;
+    private readonly IUsageTrackingService _usageTracking;
 
     public LlmCallTrackerTests()
     {
-        _tracker = new LlmCallTracker(Logger);
+        _usageTracking = Substitute.For<IUsageTrackingService>();
+        _usageTracking.GetSessionId().Returns("test-session-id");
+        _tracker = new LlmCallTracker(Logger, _usageTracking);
     }
 
     [Fact]

@@ -10,6 +10,9 @@ public static class Constants
     /// </summary>
     public static class Configuration
     {
+        // Version Management
+        public const string CurrentConfigVersion = "3.0";
+        
         // Provider Types
         public const string ProviderTypeOpenAI = "openai";
         public const string ProviderTypeOpenAICompatible = "openai-compatible";

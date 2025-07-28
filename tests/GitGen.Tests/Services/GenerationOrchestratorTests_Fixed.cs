@@ -71,6 +71,7 @@ public class GenerationOrchestratorTests_Fixed : TestBase
             _secureConfig.GetModelAsync("gpt-4").Returns(model);
             _secureConfig.LoadSettingsAsync().Returns(new GitGenSettings
             {
+                Version = Constants.Configuration.CurrentConfigVersion,
                 Models = new List<ModelConfiguration> { model },
                 Settings = new AppSettings { CopyToClipboard = false }
             });
@@ -97,6 +98,7 @@ public class GenerationOrchestratorTests_Fixed : TestBase
             _secureConfig.GetModelAsync("unknown").Returns((ModelConfiguration?)null);
             _secureConfig.LoadSettingsAsync().Returns(new GitGenSettings
             {
+                Version = Constants.Configuration.CurrentConfigVersion,
                 Models = new List<ModelConfiguration>
                 {
                     CreateTestModel("gpt-4"),
@@ -121,6 +123,7 @@ public class GenerationOrchestratorTests_Fixed : TestBase
             _secureConfig.GetModelAsync(null).Returns(model);
             _secureConfig.LoadSettingsAsync().Returns(new GitGenSettings
             {
+                Version = Constants.Configuration.CurrentConfigVersion,
                 Models = new List<ModelConfiguration> { model },
                 Settings = new AppSettings(),
                 DefaultModelId = model.Id
@@ -169,6 +172,7 @@ public class GenerationOrchestratorTests_Fixed : TestBase
             _secureConfig.GetModelAsync(null).Returns((ModelConfiguration?)null);
             _secureConfig.LoadSettingsAsync().Returns(new GitGenSettings
             {
+                Version = Constants.Configuration.CurrentConfigVersion,
                 Models = new List<ModelConfiguration>(),
                 Settings = new AppSettings()
             });

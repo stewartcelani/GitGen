@@ -466,6 +466,7 @@ public class GenerationOrchestratorTests : TestBase
             
             var settings = new GitGenSettings
             {
+                Version = Constants.Configuration.CurrentConfigVersion,
                 Models = new List<ModelConfiguration> { smartModel, otherModel },
                 Settings = new AppSettings
                 {
@@ -498,6 +499,7 @@ public class GenerationOrchestratorTests : TestBase
             
             var settings = new GitGenSettings
             {
+                Version = Constants.Configuration.CurrentConfigVersion,
                 Models = new List<ModelConfiguration> { model1, model2 },
                 Settings = new AppSettings
                 {
@@ -528,6 +530,7 @@ public class GenerationOrchestratorTests : TestBase
             
             var settings = new GitGenSettings
             {
+                Version = Constants.Configuration.CurrentConfigVersion,
                 Models = new List<ModelConfiguration> { defaultModel, otherModel },
                 Settings = new AppSettings(),
                 DefaultModelId = "default-id"
@@ -610,33 +613,49 @@ public class GenerationOrchestratorTests : TestBase
         List<string>? aliases = null,
         PricingInfo? pricing = null)
     {
-        return new ModelConfiguration
+        var model = new ModelConfiguration
         {
             Id = id ?? Guid.NewGuid().ToString(),
             Name = name,
             Type = "openai-compatible",
             Provider = "TestProvider",
-            Url = "https://api.test.com",
+            Url = "https://api.test.com/v1/chat/completions",
             ModelId = name,
-            ApiKey = "test-key",
+            ApiKey = "test-key-123456789",
             RequiresAuth = true,
             Temperature = 0.7,
             MaxOutputTokens = 5000,
-            Aliases = aliases ?? new List<string>(),
-            Pricing = pricing
+            Aliases = aliases ?? new List<string>()
         };
+        
+        // If specific pricing is provided, use it, otherwise use default pricing
+        if (pricing != null)
+        {
+            model.Pricing = pricing;
+        }
+        else
+        {
+            // Set default pricing values
+            model.Pricing.InputPer1M = 10;
+            model.Pricing.OutputPer1M = 20;
+            model.Pricing.CurrencyCode = "USD";
+        }
+        
+        return model;
     }
 
     private static GitGenSettings CreateDefaultSettings()
     {
         return new GitGenSettings
         {
+            Version = Constants.Configuration.CurrentConfigVersion,
             Models = new List<ModelConfiguration>(),
             Settings = new AppSettings
             {
                 CopyToClipboard = false,
                 ShowTokenUsage = false,
-                EnablePartialAliasMatching = false
+                EnablePartialAliasMatching = false,
+                RequirePromptConfirmation = false
             }
         };
     }
@@ -655,5 +674,444 @@ public class GenerationOrchestratorTests : TestBase
     {
         _gitService.IsGitRepository().Returns(true);
         _gitService.GetRepositoryDiff().Returns("diff content");
+    }
+
+    public class PromptConfirmationTests : GenerationOrchestratorTests
+    {
+        [Fact]
+        public async Task GenerateCommitMessage_WithConfirmationEnabled_AndUserConfirmsWithY_Proceeds()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+            
+            // Simulate user typing "y"
+            var input = new StringReader("y\n");
+            Console.SetIn(input);
+            
+            var output = new StringWriter();
+            Console.SetOut(output);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.Received(1).GenerateAsync(model, "diff content", null);
+            
+            var outputText = output.ToString();
+            outputText.Should().Contain("Send to LLM? (Y/n):");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithConfirmationEnabled_AndUserConfirmsWithYes_Proceeds()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+            
+            // Simulate user typing "yes"
+            var input = new StringReader("yes\n");
+            Console.SetIn(input);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.Received(1).GenerateAsync(model, "diff content", null);
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithConfirmationEnabled_AndUserCancelsWithN_Aborts()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            // Simulate user typing "n"
+            var input = new StringReader("n\n");
+            Console.SetIn(input);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.DidNotReceive().GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), Arg.Any<string>());
+            Logger.Received().Information("Generation cancelled.");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithConfirmationEnabled_AndUserCancelsWithNo_Aborts()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            // Simulate user typing "no"
+            var input = new StringReader("no\n");
+            Console.SetIn(input);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.DidNotReceive().GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), Arg.Any<string>());
+            Logger.Received().Information("Generation cancelled.");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithConfirmationEnabled_AndUserPressesEnter_Aborts()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            // Simulate user pressing Enter (empty input)
+            var input = new StringReader("\n");
+            Console.SetIn(input);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.DidNotReceive().GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), Arg.Any<string>());
+            Logger.Received().Information("Generation cancelled.");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithConfirmationDisabled_DoesNotPrompt()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = false;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+            
+            var output = new StringWriter();
+            Console.SetOut(output);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.Received(1).GenerateAsync(model, "diff content", null);
+            
+            var outputText = output.ToString();
+            outputText.Should().NotContain("Send to LLM? (Y/n):");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithConfirmationEnabled_ShowsPreviewInfo()
+        {
+            // Arrange
+            var model = CreateTestModel("gpt-4", pricing: new PricingInfo
+            {
+                InputPer1M = 30m,
+                OutputPer1M = 60m,
+                CurrencyCode = "USD"
+            });
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            // Simulate user confirming
+            var input = new StringReader("y\n");
+            Console.SetIn(input);
+            
+            var output = new StringWriter();
+            Console.SetOut(output);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            var outputText = output.ToString();
+            outputText.Should().Contain("Model: gpt-4");
+            outputText.Should().Contain("Git diff:");
+            outputText.Should().Contain("Estimated tokens:");
+            outputText.Should().Contain("Estimated cost:");
+        }
+
+        [Fact]
+        public async Task GenerateWithTruncatedDiff_WithConfirmationEnabled_PromptsForTruncatedDiff()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            // First prompt causes context length error, second prompt for truncated diff
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns<CommitMessageResult>(x => throw new ContextLengthExceededException("Too long", "API error message", 1000, 500),
+                                              x => CreateTestCommitMessageResult());
+            
+            // Simulate user confirming both times
+            var input = new StringReader("y\ny\n");
+            Console.SetIn(input);
+            
+            var output = new StringWriter();
+            Console.SetOut(output);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            var outputText = output.ToString();
+            outputText.Should().Contain("Send to LLM? (Y/n):");
+            outputText.Should().Contain("Send truncated diff to LLM? (Y/n):");
+            outputText.Should().Contain("Truncated diff preview:");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithCustomInstruction_ShowsInPreview()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            var customInstruction = "make it funny";
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), customInstruction)
+                .Returns(CreateTestCommitMessageResult());
+            
+            // Simulate user confirming
+            var input = new StringReader("y\n");
+            Console.SetIn(input);
+            
+            var output = new StringWriter();
+            Console.SetOut(output);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, customInstruction, false);
+
+            // Assert
+            result.Should().Be(0);
+            var outputText = output.ToString();
+            outputText.Should().Contain($"Custom instruction: \"{customInstruction}\"");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithFreeModel_AndConfirmationEnabled_ShowsWarning()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            model.Aliases = new List<string> { "free" };
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequireFreeModelConfirmation = true;
+            settings.Settings.RequirePromptConfirmation = false;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+            
+            // Simulate user confirming
+            var input = new StringReader("y\n");
+            Console.SetIn(input);
+            
+            var output = new StringWriter();
+            Console.SetOut(output);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            var outputText = output.ToString();
+            outputText.Should().Contain("WARNING: Free/Public Model Detected");
+            outputText.Should().Contain("This model appears to be configured for public repositories only");
+            outputText.Should().Contain("Are you sure you want to send your code to this model? (Y/n):");
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithFreeModel_AndUserDeclines_Cancels()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            model.Pricing = new PricingInfo { InputPer1M = 0, OutputPer1M = 0 };
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequireFreeModelConfirmation = true;
+            settings.Settings.RequirePromptConfirmation = false;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            // Simulate user declining
+            var input = new StringReader("n\n");
+            Console.SetIn(input);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.DidNotReceive().GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), Arg.Any<string>());
+            Logger.ReceivedCalls()
+                .Should().Contain(c => c.GetMethodInfo().Name == "Information" && 
+                                     c.GetArguments()[0] != null &&
+                                     c.GetArguments()[0].ToString() != null &&
+                                     c.GetArguments()[0].ToString().Contains("Generation cancelled due to free model safety check"));
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithFreeModel_AndConfirmationDisabled_Proceeds()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            model.Note = "FREE model for public repos";
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequireFreeModelConfirmation = false;
+            settings.Settings.RequirePromptConfirmation = false;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.Received(1).GenerateAsync(model, "diff content", null);
+            
+            // Should not show free model warning
+            Logger.ReceivedCalls()
+                .Should().NotContain(c => c.GetMethodInfo().Name == "Warning" && 
+                                        c.GetArguments()[0] != null &&
+                                        c.GetArguments()[0].ToString() != null &&
+                                        c.GetArguments()[0].ToString().Contains("Free/Public Model Detected"));
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithNonFreeModel_DoesNotShowWarning()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            model.Pricing = new PricingInfo { InputPer1M = 30, OutputPer1M = 60 };
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequireFreeModelConfirmation = true;
+            settings.Settings.RequirePromptConfirmation = false;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            await _generator.Received(1).GenerateAsync(model, "diff content", null);
+            
+            // Should not show free model warning
+            Logger.ReceivedCalls()
+                .Should().NotContain(c => c.GetMethodInfo().Name == "Warning" && 
+                                        c.GetArguments()[0] != null &&
+                                        c.GetArguments()[0].ToString() != null &&
+                                        c.GetArguments()[0].ToString().Contains("Free/Public Model Detected"));
+        }
+
+        [Fact]
+        public async Task GenerateCommitMessage_WithBothConfirmations_ShowsBothPrompts()
+        {
+            // Arrange
+            var model = CreateTestModel();
+            model.ModelId = "gpt-3.5:free";
+            _configService.LoadConfigurationAsync(null).Returns(model);
+            SetupValidGitRepository();
+            
+            var settings = CreateDefaultSettings();
+            settings.Settings.RequireFreeModelConfirmation = true;
+            settings.Settings.RequirePromptConfirmation = true;
+            _secureConfig.LoadSettingsAsync().Returns(settings);
+            
+            _generator.GenerateAsync(Arg.Any<ModelConfiguration>(), Arg.Any<string>(), null)
+                .Returns(CreateTestCommitMessageResult());
+            
+            // Simulate user confirming both prompts
+            var input = new StringReader("y\ny\n");
+            Console.SetIn(input);
+            
+            var output = new StringWriter();
+            Console.SetOut(output);
+
+            // Act
+            var result = await _orchestrator.ExecuteAsync(null, null, false);
+
+            // Assert
+            result.Should().Be(0);
+            var outputText = output.ToString();
+            outputText.Should().Contain("WARNING: Free/Public Model Detected");
+            outputText.Should().Contain("Are you sure you want to send your code to this model? (Y/n):");
+            outputText.Should().Contain("Send to LLM? (Y/n):");
+            await _generator.Received(1).GenerateAsync(model, "diff content", null);
+        }
     }
 }

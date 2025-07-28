@@ -178,6 +178,10 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             var maxOutputTokens = activeModel.MaxOutputTokens;
             var estimatedOutputTokens = maxOutputTokens / 2;
             _logger.Information($"   • Estimated output: ~{estimatedOutputTokens:N0} tokens (midpoint of {maxOutputTokens:N0} max)");
+            
+            // Show grand total with obvious color
+            var grandTotal = totalTokens + estimatedOutputTokens;
+            _logger.Highlight($"   • Total tokens: ~{grandTotal:N0} tokens", ConsoleColor.Yellow);
 
             // Show estimated cost if pricing available
             if (activeModel.Pricing != null)
@@ -217,7 +221,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         return Task.CompletedTask;
     }
 
-    private async Task ShowPreviewForConfirmation(ModelConfiguration activeModel, string diff, string? customInstruction)
+    private void ShowPreviewForConfirmation(ModelConfiguration activeModel, string diff, string? customInstruction)
     {
         // Show model info
         _logger.Information($"{Constants.UI.LinkSymbol} Model: {activeModel.Name} ({activeModel.ModelId} via {activeModel.Provider})");
@@ -241,6 +245,10 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         var maxOutputTokens = activeModel.MaxOutputTokens;
         var estimatedOutputTokens = maxOutputTokens / 2;
         _logger.Information($"   • Estimated output: ~{estimatedOutputTokens:N0} tokens (midpoint of {maxOutputTokens:N0} max)");
+        
+        // Show grand total with obvious color
+        var grandTotal = totalTokens + estimatedOutputTokens;
+        _logger.Highlight($"   • Total tokens: ~{grandTotal:N0} tokens", ConsoleColor.Yellow);
 
         // Show estimated cost if pricing available
         if (activeModel.Pricing != null)
@@ -290,16 +298,36 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             // Get app settings to check if confirmation is required
             var settings = await _secureConfig.LoadSettingsAsync();
             
+            // Check if this is a free model and extra confirmation is required
+            if (settings.Settings.RequireFreeModelConfirmation && activeModel.IsFreeModel())
+            {
+                _logger.Warning($"{Constants.UI.WarningSymbol} WARNING: Free/Public Model Detected");
+                _logger.Warning($"Model: {activeModel.Name}");
+                _logger.Warning("This model appears to be configured for public repositories only.");
+                Console.WriteLine();
+                
+                Console.Write("Are you sure you want to send your code to this model? (Y/n): ");
+                var freeModelConfirm = Console.ReadLine()?.Trim().ToLower();
+                
+                if (freeModelConfirm == "n" || freeModelConfirm == "no")
+                {
+                    _logger.Information("Generation cancelled due to free model safety check.");
+                    return;
+                }
+                
+                Console.WriteLine();
+            }
+            
             // Show preview information if confirmation is required
             if (settings.Settings.RequirePromptConfirmation)
             {
-                await ShowPreviewForConfirmation(activeModel, diff, instruction);
+                ShowPreviewForConfirmation(activeModel, diff, instruction);
                 
                 Console.WriteLine();
-                Console.Write("Send to LLM? (y/N): ");
+                Console.Write("Send to LLM? (Y/n): ");
                 var confirm = Console.ReadLine()?.Trim().ToLower();
                 
-                if (confirm != "y" && confirm != "yes")
+                if (confirm == "n" || confirm == "no")
                 {
                     _logger.Information("Generation cancelled.");
                     return;
@@ -534,13 +562,13 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             if (settings.Settings.RequirePromptConfirmation)
             {
                 _logger.Information("Truncated diff preview:");
-                await ShowPreviewForConfirmation(activeModel, truncatedDiff, instruction);
+                ShowPreviewForConfirmation(activeModel, truncatedDiff, instruction);
                 
                 Console.WriteLine();
-                Console.Write("Send truncated diff to LLM? (y/N): ");
+                Console.Write("Send truncated diff to LLM? (Y/n): ");
                 var confirm = Console.ReadLine()?.Trim().ToLower();
                 
-                if (confirm != "y" && confirm != "yes")
+                if (confirm == "n" || confirm == "no")
                 {
                     _logger.Information("Generation cancelled.");
                     return;

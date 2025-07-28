@@ -3,8 +3,6 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/stewartcelani/GitGen)
 ![GitHub license](https://img.shields.io/github/license/stewartcelani/GitGen)
 ![.NET](https://img.shields.io/badge/.NET-9.0-blueviolet)
-![Build Status](https://github.com/stewartcelani/GitGen/actions/workflows/ci.yml/badge.svg)
-[![codecov](https://codecov.io/gh/stewartcelani/GitGen/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/stewartcelani/GitGen)
 
 #### AI-Powered Git Commit Message Generator
 
@@ -504,6 +502,33 @@ tests/GitGen.Tests/
 ```
 
 For development guidance, see [CLAUDE.md](CLAUDE.md) in the repository.
+
+## Security
+
+GitGen takes security seriously:
+
+### 🔒 Secure Configuration
+- API keys are encrypted using platform-specific data protection (DPAPI on Windows, Keychain on macOS, Kernel keyring on Linux)
+- Never stored in plain text or environment variables
+- Automatic cleanup of sensitive data from memory
+
+### 🛡️ Automated Security Scanning
+- **CodeQL Analysis**: Automated scanning for security vulnerabilities in every push
+- **Dependabot**: Monitors dependencies for known vulnerabilities and auto-creates update PRs
+- **OpenSSF Scorecard**: Comprehensive security scoring and best practices evaluation
+
+### 📋 Security Best Practices
+- No telemetry or data collection
+- All API communications use HTTPS
+- Regular security updates and dependency maintenance
+- Clear security warnings for free/public models
+
+### 🚨 Reporting Security Issues
+If you discover a security vulnerability, please report it via:
+- GitHub Security Advisories (preferred)
+- Email: security@[domain] (see SECURITY.md)
+
+For more details, see our [Security Policy](SECURITY.md).
 
 ## Support & Feedback
 

@@ -8,7 +8,7 @@ public class GitGenSettings
     /// <summary>
     ///     Gets or sets the configuration file format version.
     /// </summary>
-    public string Version { get; set; } = "2.0";
+    public string Version { get; set; } = Constants.Configuration.CurrentConfigVersion;
 
     /// <summary>
     ///     Gets or sets the list of configured AI models.
@@ -60,4 +60,10 @@ public class AppSettings
     ///     Gets or sets whether to require user confirmation before sending prompts to LLM.
     /// </summary>
     public bool RequirePromptConfirmation { get; set; } = true;
+
+    /// <summary>
+    ///     Gets or sets whether to require extra confirmation when using free/public models.
+    ///     This helps prevent accidentally sending private code to public APIs.
+    /// </summary>
+    public bool RequireFreeModelConfirmation { get; set; } = true;
 }

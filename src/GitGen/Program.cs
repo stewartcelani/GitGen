@@ -107,8 +107,12 @@ internal class Program
                 new ConfigurationService(
                     factory.CreateLogger<ConfigurationService>(),
                     provider.GetRequiredService<ISecureConfigurationService>()))
+            .AddSingleton<IUsageTrackingService>(provider =>
+                new UsageTrackingService(factory.CreateLogger<UsageTrackingService>()))
             .AddSingleton<ILlmCallTracker>(provider =>
-                new LlmCallTracker(factory.CreateLogger<LlmCallTracker>()))
+                new LlmCallTracker(
+                    factory.CreateLogger<LlmCallTracker>(),
+                    provider.GetRequiredService<IUsageTrackingService>()))
             .AddSingleton<HttpClientService>(provider =>
                 new HttpClientService(factory.CreateLogger<HttpClientService>()))
             .AddSingleton<IHttpClientService>(provider =>
@@ -145,6 +149,8 @@ internal class Program
                     provider.GetRequiredService<GitAnalysisService>(),
                     provider.GetRequiredService<CommitMessageGenerator>(),
                     provider.GetRequiredService<GitDiffTruncationService>()))
+            .AddSingleton<IUsageReportingService>(provider =>
+                new UsageReportingService(factory.CreateLogger<UsageReportingService>()))
             .BuildServiceProvider();
     }
 
@@ -255,12 +261,110 @@ internal class Program
             Console.WriteLine();
             Console.WriteLine("Commands:");
             Console.WriteLine("  config                 Run the interactive configuration menu");
+            Console.WriteLine("  usage                  Display usage statistics and cost analysis");
             Console.WriteLine("  help                   Display help information");
             Console.WriteLine();
         });
 
+        // Define 'usage' command
+        var usageCommand = new Command("usage", "Display usage statistics and cost analysis.");
+        
+        // Add subcommands for different report types
+        var dailyCommand = new Command("daily", "Show daily usage report (default)");
+        var monthlyCommand = new Command("monthly", "Show monthly usage report");
+        
+        // Add options
+        var sinceOption = new Option<DateTime?>("--since", "Start date for custom range (YYYY-MM-DD)");
+        var untilOption = new Option<DateTime?>("--until", "End date for custom range (YYYY-MM-DD)");
+        var modelFilterOption = new Option<string?>("--model", "Filter by model name");
+        var jsonOption = new Option<bool>("--json", "Output in JSON format");
+        var costOption = new Option<bool>("--cost", "Focus on cost breakdown");
+        
+        usageCommand.AddOption(sinceOption);
+        usageCommand.AddOption(untilOption);
+        usageCommand.AddOption(modelFilterOption);
+        usageCommand.AddOption(jsonOption);
+        usageCommand.AddOption(costOption);
+        
+        // Default usage command handler (daily report)
+        usageCommand.SetHandler(async (invocationContext) =>
+        {
+            var reportingService = serviceProvider.GetRequiredService<IUsageReportingService>();
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            
+            var since = invocationContext.ParseResult.GetValueForOption(sinceOption);
+            var until = invocationContext.ParseResult.GetValueForOption(untilOption);
+            var model = invocationContext.ParseResult.GetValueForOption(modelFilterOption);
+            var json = invocationContext.ParseResult.GetValueForOption(jsonOption);
+            
+            try
+            {
+                string report;
+                
+                if (since.HasValue || until.HasValue)
+                {
+                    // Custom date range
+                    var startDate = since ?? DateTime.Today.AddDays(-30);
+                    var endDate = until ?? DateTime.Today;
+                    report = await reportingService.GenerateCustomReportAsync(startDate, endDate, model, json);
+                }
+                else
+                {
+                    // Default to daily report
+                    report = await reportingService.GenerateDailyReportAsync();
+                }
+                
+                Console.WriteLine(report);
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Failed to generate usage report: {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
+        });
+        
+        // Daily subcommand handler
+        dailyCommand.SetHandler(async (invocationContext) =>
+        {
+            var reportingService = serviceProvider.GetRequiredService<IUsageReportingService>();
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            
+            try
+            {
+                var report = await reportingService.GenerateDailyReportAsync();
+                Console.WriteLine(report);
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Failed to generate daily report: {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
+        });
+        
+        // Monthly subcommand handler
+        monthlyCommand.SetHandler(async (invocationContext) =>
+        {
+            var reportingService = serviceProvider.GetRequiredService<IUsageReportingService>();
+            var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+            
+            try
+            {
+                var report = await reportingService.GenerateMonthlyReportAsync();
+                Console.WriteLine(report);
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Failed to generate monthly report: {ex.Message}");
+                invocationContext.ExitCode = 1;
+            }
+        });
+        
+        usageCommand.AddCommand(dailyCommand);
+        usageCommand.AddCommand(monthlyCommand);
+        
         rootCommand.AddCommand(configCommand);
         rootCommand.AddCommand(helpCommand);
+        rootCommand.AddCommand(usageCommand);
         return rootCommand;
     }
 

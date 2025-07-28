@@ -9,9 +9,12 @@ namespace GitGen.Configuration;
 [JsonSerializable(typeof(ModelConfiguration))]
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(PricingInfo))]
+[JsonSerializable(typeof(List<ModelConfiguration>))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    WriteIndented = true)]
+    WriteIndented = true,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal partial class ConfigurationJsonContext : JsonSerializerContext
 {
 }

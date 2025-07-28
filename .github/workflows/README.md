@@ -33,6 +33,31 @@ The main CI workflow runs on:
 - Tests single-file, self-contained, trimmed builds
 - Targets: win-x64, linux-x64, osx-x64, osx-arm64
 
+#### 4. Security Scan (CodeQL)
+- Runs on Ubuntu (optimal performance)
+- Performs static application security testing (SAST)
+- Scans for:
+  - Security vulnerabilities
+  - Code quality issues
+  - Common programming errors
+- Results appear in GitHub's Security tab
+- Free for public repositories
+
+## Setting up Dependabot
+
+Dependabot is GitHub's automated dependency update service:
+
+1. Go to Settings > Code security and analysis
+2. Enable:
+   - Dependabot alerts
+   - Dependabot security updates
+   - Dependabot version updates (optional)
+
+Dependabot will:
+- Monitor NuGet packages for security vulnerabilities
+- Create automatic PRs to update vulnerable dependencies
+- Show security alerts in the Security tab
+
 ## Setting up Codecov
 
 1. The repository owner should:
