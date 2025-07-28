@@ -45,6 +45,9 @@ public class OpenAIProvider : ICommitMessageProvider
             modelConfig.RequiresAuth,
             callTracker,
             modelConfig);
+        
+        // Debug: Log whether call tracker was provided
+        _logger.Debug($"OpenAIProvider created with callTracker: {(_callTracker != null ? "provided" : "null")}");
     }
 
     /// <inheritdoc />
@@ -53,11 +56,14 @@ public class OpenAIProvider : ICommitMessageProvider
     /// <inheritdoc />
     public async Task<CommitMessageResult> GenerateCommitMessageAsync(string diff, string? customInstruction = null)
     {
+        _logger.Debug($"GenerateCommitMessageAsync called, callTracker is {(_callTracker != null ? "available" : "null")}");
+        
         var systemPrompt = BuildSystemPrompt(customInstruction);
         var fullPrompt = $"System: {systemPrompt}\n\nUser: {diff}";
 
         if (_callTracker != null)
         {
+            _logger.Debug("Using call tracker to track LLM call");
             var result = await _callTracker.TrackCallAsync(
                 "Generating commit message",
                 fullPrompt,
@@ -106,6 +112,7 @@ public class OpenAIProvider : ICommitMessageProvider
         }
 
         // Fallback to original implementation if no tracker
+        _logger.Debug("Call tracker is null, proceeding without usage tracking");
         var request = new OpenAIRequest
         {
             Model = _modelConfig.ModelId,

@@ -91,29 +91,35 @@ public class SecureConfigurationService : ISecureConfigurationService
                 
                 _logger.Debug("Successfully deserialized settings with {Count} models", _cachedSettings.Models?.Count ?? 0);
                 
+                // Log detailed model information after deserialization
+                foreach (var model in _cachedSettings.Models)
+                {
+                    _logger.Debug($"  Loaded Model '{model.Name}':");
+                    _logger.Debug($"    - Aliases count: {model.Aliases?.Count ?? 0}");
+                    if (model.Aliases != null && model.Aliases.Count > 0)
+                    {
+                        _logger.Debug($"    - Aliases: [{string.Join(", ", model.Aliases.Select(a => $"'{a}'"))}]");
+                    }
+                    else
+                    {
+                        _logger.Debug($"    - Aliases is {(model.Aliases == null ? "null" : "empty list")}");
+                    }
+                }
+                
                 // Version check immediately after deserialization
                 if (_cachedSettings.Version != Constants.Configuration.CurrentConfigVersion)
                 {
                     _logger.Debug("Configuration version mismatch. Found: {Found}, Expected: {Expected}", 
                         _cachedSettings.Version, Constants.Configuration.CurrentConfigVersion);
-                    _logger.Debug("Wiping old configuration for fresh setup");
+                    _logger.Debug("Migrating configuration to new version");
                     
-                    // Delete the config file
-                    try
-                    {
-                        File.Delete(_configPath);
-                    }
-                    catch (Exception deleteEx)
-                    {
-                        _logger.Debug("Failed to delete old config file: {Message}", deleteEx.Message);
-                    }
+                    // Perform migration
+                    _cachedSettings = MigrateConfiguration(_cachedSettings);
                     
-                    // Return empty settings without caching
-                    _cachedSettings = null;
-                    return new GitGenSettings 
-                    { 
-                        Settings = new AppSettings { ConfigPath = _configPath } 
-                    };
+                    // Save the migrated configuration
+                    await SaveSettingsAsync(_cachedSettings);
+                    _logger.Information("Configuration migrated successfully to version {Version}", 
+                        Constants.Configuration.CurrentConfigVersion);
                 }
             }
             catch (Exception decryptEx)
@@ -140,24 +146,15 @@ public class SecureConfigurationService : ISecureConfigurationService
                     {
                         _logger.Debug("Plain JSON configuration version mismatch. Found: {Found}, Expected: {Expected}", 
                             _cachedSettings.Version, Constants.Configuration.CurrentConfigVersion);
-                        _logger.Debug("Wiping old configuration for fresh setup");
+                        _logger.Debug("Migrating configuration to new version");
                         
-                        // Delete the config file
-                        try
-                        {
-                            File.Delete(_configPath);
-                        }
-                        catch (Exception deleteEx)
-                        {
-                            _logger.Debug("Failed to delete old config file: {Message}", deleteEx.Message);
-                        }
+                        // Perform migration
+                        _cachedSettings = MigrateConfiguration(_cachedSettings);
                         
-                        // Return empty settings without caching
-                        _cachedSettings = null;
-                        return new GitGenSettings 
-                        { 
-                            Settings = new AppSettings { ConfigPath = _configPath } 
-                        };
+                        // Save the migrated configuration
+                        await SaveSettingsAsync(_cachedSettings);
+                        _logger.Information("Configuration migrated successfully to version {Version}", 
+                            Constants.Configuration.CurrentConfigVersion);
                     }
                 }
                 catch (Exception jsonEx)
@@ -220,12 +217,23 @@ public class SecureConfigurationService : ISecureConfigurationService
         {
             _logger.Debug("SaveSettingsAsync called with {ModelCount} models", settings.Models?.Count ?? 0);
             
+            // Log detailed model information before serialization
+            foreach (var model in settings.Models)
+            {
+                _logger.Debug($"  Model '{model.Name}':");
+                _logger.Debug($"    - Aliases count: {model.Aliases?.Count ?? 0}");
+                if (model.Aliases != null && model.Aliases.Count > 0)
+                {
+                    _logger.Debug($"    - Aliases: [{string.Join(", ", model.Aliases.Select(a => $"'{a}'"))}]");
+                }
+            }
+            
             var jsonData = JsonSerializer.Serialize(settings, ConfigurationJsonContext.Default.GitGenSettings);
             _logger.Debug("Serialized JSON length: {Length} characters", jsonData.Length);
             
-            // Log first 200 chars for debugging
-            var preview = jsonData.Length > 200 ? jsonData.Substring(0, 200) + "..." : jsonData;
-            _logger.Debug("JSON preview: {Preview}", preview);
+            // Log the full JSON for debugging alias issues
+            _logger.Debug("Full JSON data being saved:");
+            _logger.Debug(jsonData);
             
             var encryptedData = _protector.Protect(jsonData);
             _logger.Debug("Encrypted data length: {Length} bytes", encryptedData.Length);
@@ -288,36 +296,54 @@ public class SecureConfigurationService : ISecureConfigurationService
         _logger.Debug($"Total models configured: {settings.Models.Count}");
         _logger.Debug($"Configuration loaded from: {_configPath}");
 
-        // Try exact match by ID first
-        var model = settings.Models.FirstOrDefault(m => m.Id == nameOrId);
-        if (model != null) 
-        {
-            _logger.Debug($"Exact match found by ID: '{model.Name}'");
-            return model;
-        }
-
-        // Try exact match by name (case-insensitive)
-        model = settings.Models.FirstOrDefault(m =>
+        // Try exact match by ID/Name (case-insensitive)
+        // Note: For new configs, ID and Name are the same. We check both for backward compatibility
+        // with old GUID-based configs during migration.
+        var model = settings.Models.FirstOrDefault(m => 
+            m.Id.Equals(nameOrId, StringComparison.OrdinalIgnoreCase) ||
             m.Name.Equals(nameOrId, StringComparison.OrdinalIgnoreCase));
         if (model != null) 
         {
-            _logger.Debug($"Exact match found by name: '{model.Name}'");
+            _logger.Debug($"Exact match found: '{model.Name}'");
             return model;
         }
 
         // Try exact match by alias (case-insensitive)
         // Handle both "free" and "@free" formats for robustness
         _logger.Debug($"Checking aliases for '{nameOrId}'");
-        foreach (var m in settings.Models.Where(m => m.Aliases != null))
+        
+        // Enhanced debug logging to diagnose alias issues
+        _logger.Debug($"Total models with aliases check:");
+        foreach (var m in settings.Models)
         {
-            _logger.Debug($"  Model '{m.Name}' has aliases: {string.Join(", ", m.Aliases)}");
+            if (m.Aliases != null && m.Aliases.Count > 0)
+            {
+                _logger.Debug($"  Model '{m.Name}' has {m.Aliases.Count} aliases: [{string.Join(", ", m.Aliases.Select(a => $"'{a}'"))}]");
+            }
+            else
+            {
+                _logger.Debug($"  Model '{m.Name}' has no aliases (Aliases={m.Aliases})");
+            }
         }
         
         model = settings.Models.FirstOrDefault(m =>
             m.Aliases != null && m.Aliases.Any(alias => 
-                alias.Equals(nameOrId, StringComparison.OrdinalIgnoreCase) ||
-                alias.Equals(nameOrId.TrimStart('@'), StringComparison.OrdinalIgnoreCase) ||
-                ("@" + alias).Equals(nameOrId, StringComparison.OrdinalIgnoreCase)));
+            {
+                var normalizedInput = nameOrId.TrimStart('@');
+                var normalizedAlias = alias.TrimStart('@');
+                
+                var match1 = alias.Equals(nameOrId, StringComparison.OrdinalIgnoreCase);
+                var match2 = alias.Equals(normalizedInput, StringComparison.OrdinalIgnoreCase);
+                var match3 = normalizedAlias.Equals(normalizedInput, StringComparison.OrdinalIgnoreCase);
+                
+                if (match1 || match2 || match3)
+                {
+                    _logger.Debug($"    MATCH: Alias '{alias}' matches input '{nameOrId}' (match1={match1}, match2={match2}, match3={match3})");
+                    return true;
+                }
+                
+                return false;
+            }));
         if (model != null)
         {
             var matchedAlias = model.Aliases!.FirstOrDefault(alias => 
@@ -378,6 +404,9 @@ public class SecureConfigurationService : ISecureConfigurationService
     {
         var settings = await LoadSettingsAsync();
         
+        // Ensure the Id is set to the Name
+        model.Id = model.Name;
+        
         // Ensure unique name
         if (settings.Models.Any(m => m.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"A model named '{model.Name}' already exists");
@@ -400,7 +429,7 @@ public class SecureConfigurationService : ISecureConfigurationService
             settings.DefaultModelId = model.Id;
         
         await SaveSettingsAsync(settings);
-        _logger.Debug("Added model '{Name}' with ID {Id}", model.Name, model.Id);
+        _logger.Debug("Added model '{Name}'", model.Name);
     }
 
     /// <inheritdoc />
@@ -412,12 +441,34 @@ public class SecureConfigurationService : ISecureConfigurationService
         if (existingIndex == -1)
             throw new InvalidOperationException($"Model with ID '{model.Id}' not found");
         
+        var existingModel = settings.Models[existingIndex];
+        var oldName = existingModel.Name;
+        
+        // If name is changing, validate uniqueness
+        if (!model.Name.Equals(oldName, StringComparison.OrdinalIgnoreCase))
+        {
+            if (settings.Models.Any(m => m.Id != model.Id && 
+                m.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"A model named '{model.Name}' already exists");
+            }
+            
+            // Update the Id to match the new name
+            model.Id = model.Name;
+            
+            // If this is the default model, update DefaultModelId
+            if (settings.DefaultModelId == oldName)
+            {
+                settings.DefaultModelId = model.Name;
+            }
+        }
+        
         // Update last used timestamp
         model.LastUsed = DateTime.UtcNow;
         
         settings.Models[existingIndex] = model;
         await SaveSettingsAsync(settings);
-        _logger.Debug("Updated model '{Name}' with ID {Id}", model.Name, model.Id);
+        _logger.Debug("Updated model '{Name}'", model.Name);
     }
 
     /// <inheritdoc />
@@ -436,7 +487,7 @@ public class SecureConfigurationService : ISecureConfigurationService
             settings.DefaultModelId = settings.Models.FirstOrDefault()?.Id;
         
         await SaveSettingsAsync(settings);
-        _logger.Debug("Deleted model '{Name}' with ID {Id}", model.Name, model.Id);
+        _logger.Debug("Deleted model '{Name}'", model.Name);
     }
 
     /// <inheritdoc />
@@ -725,5 +776,57 @@ public class SecureConfigurationService : ISecureConfigurationService
         var keyPath = Path.Combine(homeDir, ".gitgen", "keys");
         Directory.CreateDirectory(keyPath);
         return keyPath;
+    }
+    
+    /// <summary>
+    ///     Migrates configuration from older versions to the current version.
+    /// </summary>
+    /// <param name="settings">The settings to migrate.</param>
+    /// <returns>The migrated settings.</returns>
+    private GitGenSettings MigrateConfiguration(GitGenSettings settings)
+    {
+        _logger.Debug("Starting configuration migration from version {OldVersion} to {NewVersion}", 
+            settings.Version, Constants.Configuration.CurrentConfigVersion);
+        
+        // Migrate from version 3.0 to 4.0: Convert GUID IDs to model names
+        if (settings.Version == "3.0")
+        {
+            _logger.Debug("Migrating from version 3.0: Converting GUID IDs to model names");
+            
+            foreach (var model in settings.Models)
+            {
+                var oldId = model.Id;
+                
+                // Check if the ID looks like a GUID
+                if (Guid.TryParse(oldId, out _))
+                {
+                    // Update the ID to be the model name
+                    model.Id = model.Name;
+                    _logger.Debug("Migrated model '{Name}' from ID '{OldId}' to '{NewId}'", 
+                        model.Name, oldId, model.Id);
+                    
+                    // If this model was the default, update the DefaultModelId
+                    if (settings.DefaultModelId == oldId)
+                    {
+                        settings.DefaultModelId = model.Name;
+                        _logger.Debug("Updated DefaultModelId from '{OldId}' to '{NewId}'", 
+                            oldId, model.Name);
+                    }
+                }
+                else
+                {
+                    _logger.Debug("Model '{Name}' already has non-GUID ID '{Id}', skipping", 
+                        model.Name, model.Id);
+                }
+            }
+            
+            // Update version
+            settings.Version = "4.0";
+        }
+        
+        // Future migrations can be added here
+        // if (settings.Version == "4.0") { ... migrate to 5.0 ... }
+        
+        return settings;
     }
 }

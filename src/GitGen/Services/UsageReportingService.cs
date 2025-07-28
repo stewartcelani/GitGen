@@ -12,7 +12,6 @@ public class UsageReportingService : IUsageReportingService
 {
     private readonly string _usageDirectory;
     private readonly IConsoleLogger _logger;
-    private readonly JsonSerializerOptions _jsonOptions;
 
     public UsageReportingService(IConsoleLogger logger)
     {
@@ -20,11 +19,6 @@ public class UsageReportingService : IUsageReportingService
         
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _usageDirectory = Path.Combine(homeDir, ".gitgen", "usage");
-        
-        _jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        };
     }
 
     public async Task<IEnumerable<UsageEntry>> GetUsageEntriesAsync(DateTime startDate, DateTime endDate)
@@ -54,7 +48,7 @@ public class UsageReportingService : IUsageReportingService
                     
                     try
                     {
-                        var entry = JsonSerializer.Deserialize<UsageEntry>(line, _jsonOptions);
+                        var entry = JsonSerializer.Deserialize(line, UsageJsonContext.Default.UsageEntry);
                         if (entry != null && 
                             entry.Timestamp.Date >= startDate.Date && 
                             entry.Timestamp.Date <= endDate.Date)

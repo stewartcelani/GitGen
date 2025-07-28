@@ -7,15 +7,31 @@ namespace GitGen.Configuration;
 /// </summary>
 public class ModelConfiguration
 {
+    private string _name = string.Empty;
+
     /// <summary>
     ///     Gets or sets the unique identifier for this model configuration.
+    ///     This is automatically set to the model's Name for readability.
     /// </summary>
-    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Id { get; set; } = string.Empty;
 
     /// <summary>
     ///     Gets or sets the user-friendly name for this model (e.g., "gpt-4-turbo", "claude-work").
+    ///     Setting this also updates the Id property.
     /// </summary>
-    public string Name { get; set; } = string.Empty;
+    public string Name 
+    { 
+        get => _name;
+        set
+        {
+            _name = value;
+            // Automatically sync Id with Name
+            if (!string.IsNullOrEmpty(value))
+            {
+                Id = value;
+            }
+        }
+    }
 
     /// <summary>
     ///     Gets or sets the API compatibility type (e.g., "openai-compatible").

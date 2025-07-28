@@ -615,7 +615,7 @@ public class GenerationOrchestratorTests : TestBase
     {
         var model = new ModelConfiguration
         {
-            Id = id ?? Guid.NewGuid().ToString(),
+            Id = id ?? name,
             Name = name,
             Type = "openai-compatible",
             Provider = "TestProvider",

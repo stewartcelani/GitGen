@@ -169,6 +169,7 @@ public class LlmCallTracker : ILlmCallTracker
     
     private async Task RecordUsageAsync(LlmCallResult result)
     {
+        _logger.Debug("LlmCallTracker.RecordUsageAsync started");
         try
         {
             // Get git repository information
@@ -225,7 +226,9 @@ public class LlmCallTracker : ILlmCallTracker
             }
             
             // Record the usage
+            _logger.Debug($"Recording usage for model: {entry.Model.Name}, tokens: {entry.Tokens.Total}, cost: {entry.Cost?.Amount ?? 0}");
             await _usageTracking.RecordUsageAsync(entry);
+            _logger.Debug("Usage recording completed successfully");
         }
         catch (Exception ex)
         {

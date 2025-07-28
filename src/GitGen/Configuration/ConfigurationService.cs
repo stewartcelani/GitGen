@@ -56,7 +56,7 @@ public class ConfigurationService
             {
                 // IMPORTANT: When a specific model is requested but not found,
                 // we must return null. Never fall back to the default model.
-                _logger.Error($"Model '{modelName}' not found - no fallback will be attempted");
+                _logger.Debug($"Model '{modelName}' not found");
                 return null;
             }
             _logger.Debug($"Successfully loaded model '{model.Name}' (requested as '{modelName}')");

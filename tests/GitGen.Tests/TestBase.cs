@@ -72,10 +72,11 @@ public abstract class TestBase : IDisposable
     /// </summary>
     protected ModelConfiguration CreateTestModel(string? name = null)
     {
+        var modelName = name ?? "test-model";
         var model = new ModelConfiguration
         {
-            Id = Guid.NewGuid().ToString(),
-            Name = name ?? "test-model",
+            Id = modelName,
+            Name = modelName,
             Type = "openai-compatible",
             Provider = "TestProvider",
             Url = "https://api.test.com/v1/chat/completions",

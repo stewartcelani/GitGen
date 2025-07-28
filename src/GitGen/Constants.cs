@@ -11,7 +11,7 @@ public static class Constants
     public static class Configuration
     {
         // Version Management
-        public const string CurrentConfigVersion = "3.0";
+        public const string CurrentConfigVersion = "4.0";
         
         // Provider Types
         public const string ProviderTypeOpenAI = "openai";

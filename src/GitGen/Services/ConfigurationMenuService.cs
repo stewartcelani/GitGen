@@ -1195,11 +1195,7 @@ public class ConfigurationMenuService
             var settings = await _secureConfig.LoadSettingsAsync();
             
             // Serialize to JSON for inspection
-            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions 
-            { 
-                WriteIndented = true,
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-            });
+            var json = JsonSerializer.Serialize(settings, ConfigurationJsonContext.Default.GitGenSettings);
             
             _logger.Information("Current settings JSON:");
             Console.WriteLine(json);

@@ -85,7 +85,7 @@ public class ModelConfigurationTests
         var model = new ModelConfiguration();
 
         // Assert
-        model.Id.Should().NotBeNullOrEmpty();
+        model.Id.Should().BeEmpty(); // ID is set from Name, which starts empty
         model.Name.Should().BeEmpty();
         model.RequiresAuth.Should().BeTrue();
         model.UseLegacyMaxTokens.Should().BeFalse();
@@ -291,5 +291,24 @@ public class ModelConfigurationTests
         var errors = model.GetValidationErrors();
         errors.Should().ContainKey("Pricing");
         errors["Pricing"].Should().Be("Input cost per million tokens cannot be negative");
+    }
+    
+    [Fact]
+    public void SettingName_UpdatesId()
+    {
+        // Arrange
+        var model = new ModelConfiguration();
+        
+        // Act
+        model.Name = "test-model";
+        
+        // Assert
+        model.Id.Should().Be("test-model");
+        
+        // Act - Update name
+        model.Name = "updated-model";
+        
+        // Assert - Id should update
+        model.Id.Should().Be("updated-model");
     }
 }
