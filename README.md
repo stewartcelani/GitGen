@@ -3,6 +3,8 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/stewartcelani/GitGen)
 ![GitHub license](https://img.shields.io/github/license/stewartcelani/GitGen)
 ![.NET](https://img.shields.io/badge/.NET-9.0-blueviolet)
+![Build Status](https://github.com/stewartcelani/GitGen/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/stewartcelani/GitGen/graph/badge.svg?token=YOUR_TOKEN)](https://codecov.io/gh/stewartcelani/GitGen)
 
 #### AI-Powered Git Commit Message Generator
 

@@ -55,4 +55,9 @@ public class AppSettings
     ///     Gets or sets the minimum number of characters required for partial alias matching.
     /// </summary>
     public int MinimumAliasMatchLength { get; set; } = 2;
+
+    /// <summary>
+    ///     Gets or sets whether to require user confirmation before sending prompts to LLM.
+    /// </summary>
+    public bool RequirePromptConfirmation { get; set; } = true;
 }

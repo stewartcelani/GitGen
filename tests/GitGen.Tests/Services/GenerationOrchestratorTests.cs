@@ -33,6 +33,7 @@ public class GenerationOrchestratorTests : TestBase
         _wizardService = new ConfigurationWizardService(Logger, _providerFactory, _configService, _secureConfig);
         _gitService = Substitute.For<GitAnalysisService>(Logger);
         _generator = new CommitMessageGenerator(_providerFactory, Logger);
+        var truncationService = Substitute.For<GitDiffTruncationService>(Logger);
         
         _orchestrator = new GenerationOrchestrator(
             Logger,
@@ -40,7 +41,8 @@ public class GenerationOrchestratorTests : TestBase
             _configService,
             _wizardService,
             _gitService,
-            _generator);
+            _generator,
+            truncationService);
     }
 
     public class ExecuteAsyncTests : GenerationOrchestratorTests

@@ -82,7 +82,7 @@ public static class CostCalculationService
         decimal outputCost = (outputTokens / 1_000_000m) * model.Pricing.OutputPer1M;
         decimal totalCost = inputCost + outputCost;
 
-        return FormatCurrency(totalCost, model.Pricing.CurrencyCode);
+        return FormatCurrency(totalCost, model.Pricing.CurrencyCode, 3);
     }
 
     /// <summary>
@@ -209,9 +209,9 @@ public static class CostCalculationService
         decimal outputCost = (outputTokens / 1_000_000m) * model.Pricing.OutputPer1M;
         decimal totalCost = inputCost + outputCost;
 
-        var inputCostStr = FormatCurrency(inputCost, model.Pricing.CurrencyCode);
-        var outputCostStr = FormatCurrency(outputCost, model.Pricing.CurrencyCode);
-        var totalCostStr = FormatCurrency(totalCost, model.Pricing.CurrencyCode);
+        var inputCostStr = FormatCurrency(inputCost, model.Pricing.CurrencyCode, 3);
+        var outputCostStr = FormatCurrency(outputCost, model.Pricing.CurrencyCode, 3);
+        var totalCostStr = FormatCurrency(totalCost, model.Pricing.CurrencyCode, 3);
 
         return $"Input: {inputCostStr} ({inputTokens:N0} tokens) + Output: {outputCostStr} ({outputTokens:N0} tokens) = Total: {totalCostStr}";
     }

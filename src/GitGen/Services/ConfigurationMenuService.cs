@@ -136,6 +136,9 @@ public class ConfigurationMenuService
                 case "4":
                     await DeleteModel();
                     break;
+                case "5":
+                    await AddNewModel();
+                    break;
                 case "0":
                 case "":
                 case null:
@@ -159,6 +162,7 @@ public class ConfigurationMenuService
         _logger.Information("2. Set default model");
         _logger.Information("3. Edit model (aliases, tokens, etc.)");
         _logger.Information("4. Delete model");
+        _logger.Information("5. Add new model");
         _logger.Information("0. Back to main menu");
         
         Console.WriteLine();
@@ -663,6 +667,9 @@ public class ConfigurationMenuService
                 case "4":
                     await SetMinimumAliasMatchLength();
                     break;
+                case "5":
+                    await TogglePromptConfirmation();
+                    break;
                 case "0":
                 case "":
                 case null:
@@ -686,11 +693,13 @@ public class ConfigurationMenuService
         var tokenUsageStatus = appSettings.ShowTokenUsage ? "ON" : "OFF";
         var clipboardStatus = appSettings.CopyToClipboard ? "ON" : "OFF";
         var partialMatchStatus = appSettings.EnablePartialAliasMatching ? "ON" : "OFF";
+        var confirmationStatus = appSettings.RequirePromptConfirmation ? "ON" : "OFF";
         
         _logger.Information($"1. Show token usage: {tokenUsageStatus}");
         _logger.Information($"2. Copy to clipboard: {clipboardStatus}");
         _logger.Information($"3. Enable partial alias matching: {partialMatchStatus}");
         _logger.Information($"4. Minimum alias match length: {appSettings.MinimumAliasMatchLength} chars");
+        _logger.Information($"5. Require prompt confirmation: {confirmationStatus}");
         _logger.Information("0. Back to main menu");
         
         Console.WriteLine();
@@ -754,6 +763,17 @@ public class ConfigurationMenuService
             _logger.Warning("Invalid input. Length must be between 2 and 10.");
         }
         
+        await Task.Delay(1500);
+    }
+    
+    private async Task TogglePromptConfirmation()
+    {
+        var settings = await _secureConfig.LoadSettingsAsync();
+        settings.Settings.RequirePromptConfirmation = !settings.Settings.RequirePromptConfirmation;
+        await _secureConfig.SaveSettingsAsync(settings);
+        
+        var status = settings.Settings.RequirePromptConfirmation ? "enabled" : "disabled";
+        _logger.Success($"{Constants.UI.CheckMark} Prompt confirmation {status}");
         await Task.Delay(1500);
     }
     
@@ -925,5 +945,16 @@ public class ConfigurationMenuService
             return true;
         
         return false;
+    }
+    
+    private async Task TogglePromptConfirmation()
+    {
+        var settings = await _secureConfig.LoadSettingsAsync();
+        settings.Settings.RequirePromptConfirmation = !settings.Settings.RequirePromptConfirmation;
+        await _secureConfig.SaveSettingsAsync(settings);
+        
+        var status = settings.Settings.RequirePromptConfirmation ? "enabled" : "disabled";
+        _logger.Success($"{Constants.UI.CheckMark} Prompt confirmation {status}");
+        await Task.Delay(1500);
     }
 }

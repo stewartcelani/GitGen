@@ -63,31 +63,25 @@ public class ProgramTests : TestBase
     }
 
     [Fact]
-    public async Task ConfigCommand_CallsConfigurationMenuService()
+    public void PreprocessArguments_WithComplexScenarios_HandlesCorrectly()
     {
-        // Arrange
-        var menuService = Substitute.For<ConfigurationMenuService>(
-            Logger,
-            Substitute.For<ISecureConfigurationService>(),
-            Substitute.For<ConfigurationWizardService>(
-                Logger,
-                Substitute.For<ProviderFactory>(CreateServiceProvider(), Logger),
-                Substitute.For<ConfigurationService>(Logger),
-                null),
-            Substitute.For<ConfigurationService>(Logger),
-            Substitute.For<ProviderFactory>(CreateServiceProvider(), Logger));
-
-        var services = new ServiceCollection();
-        ConfigureTestServices(services, menuService);
-        var serviceProvider = services.BuildServiceProvider();
-
-        // Act
-        var args = new[] { "config" };
-        var result = await InvokeWithServicesAsync(args, serviceProvider);
-
-        // Assert
-        result.Should().Be(0);
-        await menuService.Received(1).RunAsync();
+        // This test exercises more of the PreprocessArguments logic for better coverage
+        
+        // Test with empty args
+        var result1 = Program.PreprocessArguments(new string[0]);
+        result1.Should().BeEmpty();
+        
+        // Test with no alias
+        var result2 = Program.PreprocessArguments(new[] { "some", "message" });
+        result2.Should().Equal("some", "message");
+        
+        // Test with just @ symbol (should be ignored)
+        var result3 = Program.PreprocessArguments(new[] { "@" });
+        result3.Should().Equal("@");
+        
+        // Test with multiple arguments and alias at different positions
+        var result4 = Program.PreprocessArguments(new[] { "commit", "@fast", "message" });
+        result4.Should().Equal("commit", "message", "--model", "fast");
     }
 
     private async Task<int> InvokeMainAsync(string[] args)

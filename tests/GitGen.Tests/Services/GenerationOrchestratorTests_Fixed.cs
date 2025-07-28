@@ -37,6 +37,7 @@ public class GenerationOrchestratorTests_Fixed : TestBase
         var wizardService = new ConfigurationWizardService(Logger, providerFactory, configService, _secureConfig);
         var gitService = new GitAnalysisService(Logger);
         var generator = new CommitMessageGenerator(providerFactory, Logger);
+        var truncationService = new GitDiffTruncationService(Logger);
         
         _orchestrator = new GenerationOrchestrator(
             Logger,
@@ -44,7 +45,8 @@ public class GenerationOrchestratorTests_Fixed : TestBase
             configService,
             wizardService,
             gitService,
-            generator);
+            generator,
+            truncationService);
 
         // Default setup for provider
         provider.GenerateCommitMessageAsync(Arg.Any<string>(), Arg.Any<string>())

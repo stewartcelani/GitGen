@@ -217,6 +217,57 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         return Task.CompletedTask;
     }
 
+    private async Task ShowPreviewForConfirmation(ModelConfiguration activeModel, string diff, string? customInstruction)
+    {
+        // Show model info
+        _logger.Information($"{Constants.UI.LinkSymbol} Model: {activeModel.Name} ({activeModel.ModelId} via {activeModel.Provider})");
+
+        // Calculate and show diff stats
+        var diffLines = diff.Split('\n').Length;
+        var diffChars = diff.Length;
+        _logger.Information($"{Constants.UI.BulbSymbol} Git diff: {diffLines:N0} lines, {diffChars:N0} characters");
+
+        // Estimate tokens
+        var systemPromptSize = EstimateSystemPromptSize(activeModel, customInstruction);
+        var diffTokens = EstimateTokens(diff);
+        var totalTokens = systemPromptSize + diffTokens;
+
+        _logger.Information($"{Constants.UI.ChartSymbol} Estimated tokens:");
+        _logger.Information($"   • System prompt: ~{systemPromptSize:N0} tokens");
+        _logger.Information($"   • Git diff: ~{diffTokens:N0} tokens");
+        _logger.Information($"   • Total input: ~{totalTokens:N0} tokens");
+        
+        // Estimate output tokens as midpoint of max output tokens
+        var maxOutputTokens = activeModel.MaxOutputTokens;
+        var estimatedOutputTokens = maxOutputTokens / 2;
+        _logger.Information($"   • Estimated output: ~{estimatedOutputTokens:N0} tokens (midpoint of {maxOutputTokens:N0} max)");
+
+        // Show estimated cost if pricing available
+        if (activeModel.Pricing != null)
+        {
+            var inputCost = (totalTokens / 1_000_000.0) * (double)activeModel.Pricing.InputPer1M;
+            var outputCost = (estimatedOutputTokens / 1_000_000.0) * (double)activeModel.Pricing.OutputPer1M;
+            var totalCost = inputCost + outputCost;
+            
+            // Use CostCalculationService to format with proper currency
+            var inputCostStr = CostCalculationService.FormatCurrency((decimal)inputCost, activeModel.Pricing.CurrencyCode, 4);
+            var outputCostStr = CostCalculationService.FormatCurrency((decimal)outputCost, activeModel.Pricing.CurrencyCode, 4);
+            var totalCostStr = CostCalculationService.FormatCurrency((decimal)totalCost, activeModel.Pricing.CurrencyCode, 4);
+            
+            _logger.Information($"💰 Estimated cost:");
+            _logger.Information($"   • Input: ~{inputCostStr}");
+            _logger.Information($"   • Output: ~{outputCostStr}");
+            _logger.Information($"   • Total: ~{totalCostStr}");
+        }
+
+        // Show custom instruction if provided
+        if (!string.IsNullOrWhiteSpace(customInstruction))
+        {
+            Console.WriteLine();
+            _logger.Information($"{Constants.UI.InfoSymbol} Custom instruction: \"{customInstruction}\"");
+        }
+    }
+
     private async Task GenerateCommitMessageAsync(ModelConfiguration activeModel, string? instruction)
     {
         string diff = "";
@@ -236,6 +287,27 @@ public class GenerationOrchestrator : IGenerationOrchestrator
                 return;
             }
 
+            // Get app settings to check if confirmation is required
+            var settings = await _secureConfig.LoadSettingsAsync();
+            
+            // Show preview information if confirmation is required
+            if (settings.Settings.RequirePromptConfirmation)
+            {
+                await ShowPreviewForConfirmation(activeModel, diff, instruction);
+                
+                Console.WriteLine();
+                Console.Write("Send to LLM? (y/N): ");
+                var confirm = Console.ReadLine()?.Trim().ToLower();
+                
+                if (confirm != "y" && confirm != "yes")
+                {
+                    _logger.Information("Generation cancelled.");
+                    return;
+                }
+                
+                Console.WriteLine();
+            }
+
             _logger.Information($"{Constants.UI.LoadingSymbol} {Constants.Messages.GeneratingCommitMessage}");
             Console.WriteLine();
 
@@ -248,9 +320,6 @@ public class GenerationOrchestrator : IGenerationOrchestrator
                 ConsoleColor.DarkCyan);
 
             Console.WriteLine();
-
-            // Get app settings
-            var settings = await _secureConfig.LoadSettingsAsync();
 
             // Display token usage if enabled
             if (settings.Settings.ShowTokenUsage && result.InputTokens.HasValue && result.OutputTokens.HasValue)
@@ -458,6 +527,28 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             
             _logger.Debug($"Truncated diff from {originalDiff.Length:N0} to {truncatedDiff.Length:N0} characters");
             
+            // Get app settings to check if confirmation is required
+            var settings = await _secureConfig.LoadSettingsAsync();
+            
+            // Show preview information if confirmation is required
+            if (settings.Settings.RequirePromptConfirmation)
+            {
+                _logger.Information("Truncated diff preview:");
+                await ShowPreviewForConfirmation(activeModel, truncatedDiff, instruction);
+                
+                Console.WriteLine();
+                Console.Write("Send truncated diff to LLM? (y/N): ");
+                var confirm = Console.ReadLine()?.Trim().ToLower();
+                
+                if (confirm != "y" && confirm != "yes")
+                {
+                    _logger.Information("Generation cancelled.");
+                    return;
+                }
+                
+                Console.WriteLine();
+            }
+            
             // Generate with truncated diff
             var result = await _generator.GenerateAsync(activeModel, truncatedDiff, instruction);
 
@@ -468,9 +559,6 @@ public class GenerationOrchestrator : IGenerationOrchestrator
                 ConsoleColor.DarkCyan);
 
             Console.WriteLine();
-
-            // Get app settings
-            var settings = await _secureConfig.LoadSettingsAsync();
 
             // Display token usage if enabled
             if (settings.Settings.ShowTokenUsage && result.InputTokens.HasValue && result.OutputTokens.HasValue)

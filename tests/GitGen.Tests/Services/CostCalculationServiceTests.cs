@@ -25,7 +25,7 @@ public class CostCalculationServiceTests
         var result = CostCalculationService.CalculateAndFormatCost(model, 1000, 500);
 
         // Assert
-        result.Should().Be("$0.03");
+        result.Should().Be("$0.025");
     }
 
     [Fact]
@@ -133,8 +133,8 @@ public class CostCalculationServiceTests
         var result = CostCalculationService.GetCostBreakdown(model, 2000, 500);
 
         // Assert
-        result.Should().Contain("Input: $0.02 (2,000 tokens)");
-        result.Should().Contain("Output: $0.02 (500 tokens)");
-        result.Should().Contain("Total: $0.04");
+        result.Should().Contain("Input: $0.020 (2,000 tokens)");
+        result.Should().Contain("Output: $0.015 (500 tokens)");
+        result.Should().Contain("Total: $0.035");
     }
 }
