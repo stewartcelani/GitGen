@@ -22,14 +22,13 @@ namespace GitGen;
 internal class Program
 {
     /// <summary>
-    ///     Main entry point for the GitGen application.
+    ///     Preprocesses command line arguments to handle @model syntax.
+    ///     Exposed as internal for testing purposes.
     /// </summary>
-    /// <param name="args">Command-line arguments.</param>
-    /// <returns>Exit code (0 for success, non-zero for failure).</returns>
-    private static async Task<int> Main(string[] args)
+    /// <param name="args">Raw command line arguments.</param>
+    /// <returns>Processed arguments with @model converted to --model option.</returns>
+    internal static string[] PreprocessArguments(string[] args)
     {
-        Console.OutputEncoding = Encoding.UTF8;
-        
         // Pre-parse arguments to handle @model syntax
         string? modelNameFromAlias = null;
         var processedArgs = new List<string>(args.Length);
@@ -55,9 +54,23 @@ internal class Program
         // as a standard, hidden option that System.CommandLine can parse safely.
         if (!string.IsNullOrEmpty(modelNameFromAlias))
         {
-            processedArgs.Insert(0, modelNameFromAlias);
-            processedArgs.Insert(0, "--model");
+            processedArgs.Add("--model");
+            processedArgs.Add(modelNameFromAlias);
         }
+
+        return processedArgs.ToArray();
+    }
+    /// <summary>
+    ///     Main entry point for the GitGen application.
+    /// </summary>
+    /// <param name="args">Command-line arguments.</param>
+    /// <returns>Exit code (0 for success, non-zero for failure).</returns>
+    private static async Task<int> Main(string[] args)
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+        
+        // Preprocess arguments to handle @model syntax
+        var processedArgs = PreprocessArguments(args);
         
         var serviceProvider = ConfigureServices();
         var rootCommand = BuildCommandLine(serviceProvider);
@@ -79,7 +92,7 @@ internal class Program
             .CancelOnProcessTermination()
             .Build();
 
-        return await parser.InvokeAsync(processedArgs.ToArray());
+        return await parser.InvokeAsync(processedArgs);
     }
 
     private static ServiceProvider ConfigureServices()
@@ -98,6 +111,8 @@ internal class Program
                 new LlmCallTracker(factory.CreateLogger<LlmCallTracker>()))
             .AddSingleton<HttpClientService>(provider =>
                 new HttpClientService(factory.CreateLogger<HttpClientService>()))
+            .AddSingleton<IHttpClientService>(provider =>
+                provider.GetRequiredService<HttpClientService>())
             .AddSingleton<ProviderFactory>(provider =>
                 new ProviderFactory(provider, factory.CreateLogger<ProviderFactory>()))
             .AddSingleton<GitAnalysisService>(provider =>

@@ -14,7 +14,7 @@ namespace GitGen.Providers.OpenAI;
 /// </summary>
 public class OpenAIProvider : ICommitMessageProvider
 {
-    private readonly HttpClientService _httpClient;
+    private readonly IHttpClientService _httpClient;
     private readonly IConsoleLogger _logger;
     private readonly OpenAIParameterDetector _parameterDetector;
     private readonly ILlmCallTracker? _callTracker;
@@ -28,7 +28,7 @@ public class OpenAIProvider : ICommitMessageProvider
     /// <param name="modelConfig">The model configuration containing API settings.</param>
     /// <param name="callTracker">Optional call tracker for monitoring LLM usage.</param>
     public OpenAIProvider(
-        HttpClientService httpClient,
+        IHttpClientService httpClient,
         IConsoleLogger logger,
         ModelConfiguration modelConfig,
         ILlmCallTracker? callTracker = null)

@@ -38,12 +38,12 @@ public class ProviderFactory
         return type switch
         {
             "openai" => new OpenAIProvider(
-                _serviceProvider.GetRequiredService<HttpClientService>(),
+                _serviceProvider.GetRequiredService<IHttpClientService>(),
                 _serviceProvider.GetRequiredService<ConsoleLoggerFactory>().CreateLogger<OpenAIProvider>(),
                 modelConfig,
                 _serviceProvider.GetService<ILlmCallTracker>()),
             "openai-compatible" => new OpenAIProvider(
-                _serviceProvider.GetRequiredService<HttpClientService>(),
+                _serviceProvider.GetRequiredService<IHttpClientService>(),
                 _serviceProvider.GetRequiredService<ConsoleLoggerFactory>().CreateLogger<OpenAIProvider>(),
                 modelConfig,
                 _serviceProvider.GetService<ILlmCallTracker>()),

@@ -26,14 +26,14 @@ public class OpenAIParameterDetector
 {
     private readonly string? _apiKey;
     private readonly string _baseUrl;
-    private readonly HttpClientService _httpClient;
+    private readonly IHttpClientService _httpClient;
     private readonly IConsoleLogger _logger;
     private readonly bool _requiresAuth;
     private readonly ILlmCallTracker? _callTracker;
     private readonly ModelConfiguration? _modelConfig;
 
     public OpenAIParameterDetector(
-        HttpClientService httpClient,
+        IHttpClientService httpClient,
         IConsoleLogger logger,
         string baseUrl,
         string? apiKey,

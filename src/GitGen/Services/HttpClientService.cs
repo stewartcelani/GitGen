@@ -100,7 +100,7 @@ public enum ErrorDetailLevel
 ///     HTTP client service with built-in retry logic and request cloning for reliable API communication.
 ///     Handles rate limiting, transient failures, and provides comprehensive error handling.
 /// </summary>
-public class HttpClientService
+public class HttpClientService : IHttpClientService
 {
     private readonly HttpClient _httpClient;
     private readonly IConsoleLogger _logger;

@@ -157,6 +157,7 @@ public class SecureConfigurationService : ISecureConfigurationService
         var settings = await LoadSettingsAsync();
         
         _logger.Debug($"Total models configured: {settings.Models.Count}");
+        _logger.Debug($"Configuration loaded from: {_configPath}");
 
         // Try exact match by ID first
         var model = settings.Models.FirstOrDefault(m => m.Id == nameOrId);
@@ -176,12 +177,25 @@ public class SecureConfigurationService : ISecureConfigurationService
         }
 
         // Try exact match by alias (case-insensitive)
+        // Handle both "free" and "@free" formats for robustness
+        _logger.Debug($"Checking aliases for '{nameOrId}'");
+        foreach (var m in settings.Models.Where(m => m.Aliases != null))
+        {
+            _logger.Debug($"  Model '{m.Name}' has aliases: {string.Join(", ", m.Aliases)}");
+        }
+        
         model = settings.Models.FirstOrDefault(m =>
             m.Aliases != null && m.Aliases.Any(alias => 
-                alias.Equals(nameOrId, StringComparison.OrdinalIgnoreCase)));
+                alias.Equals(nameOrId, StringComparison.OrdinalIgnoreCase) ||
+                alias.Equals(nameOrId.TrimStart('@'), StringComparison.OrdinalIgnoreCase) ||
+                ("@" + alias).Equals(nameOrId, StringComparison.OrdinalIgnoreCase)));
         if (model != null)
         {
-            _logger.Debug("Matched '{Input}' to model '{Model}' via alias", nameOrId, model.Name);
+            var matchedAlias = model.Aliases!.FirstOrDefault(alias => 
+                alias.Equals(nameOrId, StringComparison.OrdinalIgnoreCase) ||
+                alias.Equals(nameOrId.TrimStart('@'), StringComparison.OrdinalIgnoreCase) ||
+                ("@" + alias).Equals(nameOrId, StringComparison.OrdinalIgnoreCase));
+            _logger.Debug("Matched '{Input}' to model '{Model}' via alias '{Alias}'", nameOrId, model.Name, matchedAlias ?? string.Empty);
             return model;
         }
 
@@ -324,6 +338,9 @@ public class SecureConfigurationService : ISecureConfigurationService
         string? newAlias = null, 
         string? excludeModelId = null)
     {
+        // Normalize the new alias if provided
+        var normalizedNewAlias = newAlias?.TrimStart('@');
+        
         var allAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         
         // Collect all existing aliases
@@ -345,18 +362,18 @@ public class SecureConfigurationService : ISecureConfigurationService
         }
         
         // Check new alias if provided
-        if (!string.IsNullOrWhiteSpace(newAlias))
+        if (!string.IsNullOrWhiteSpace(normalizedNewAlias))
         {
-            if (allAliases.ContainsKey(newAlias))
+            if (allAliases.ContainsKey(normalizedNewAlias))
             {
-                return (false, $"Alias '{newAlias}' is already used by model '{allAliases[newAlias]}'");
+                return (false, $"Alias '@{normalizedNewAlias}' is already used by model '{allAliases[normalizedNewAlias]}'");
             }
             
             // Also check if alias conflicts with existing model names
             if (settings.Models.Any(m => m.Id != excludeModelId && 
-                m.Name.Equals(newAlias, StringComparison.OrdinalIgnoreCase)))
+                m.Name.Equals(normalizedNewAlias, StringComparison.OrdinalIgnoreCase)))
             {
-                return (false, $"Alias '{newAlias}' conflicts with an existing model name");
+                return (false, $"Alias '@{normalizedNewAlias}' conflicts with an existing model name");
             }
         }
         
@@ -369,6 +386,10 @@ public class SecureConfigurationService : ISecureConfigurationService
         if (string.IsNullOrWhiteSpace(alias))
             throw new ArgumentException("Alias cannot be empty or whitespace", nameof(alias));
         
+        // Normalize alias by removing @ prefix if present
+        var normalizedAlias = alias.TrimStart('@');
+        _logger.Debug($"AddAliasAsync: normalizing '{alias}' to '{normalizedAlias}'");
+        
         var settings = await LoadSettingsAsync();
         var model = await GetModelAsync(modelNameOrId);
         
@@ -379,23 +400,23 @@ public class SecureConfigurationService : ISecureConfigurationService
         if (model.Aliases == null)
             model.Aliases = new List<string>();
         
-        // Check if alias already exists for this model
-        if (model.Aliases.Any(a => a.Equals(alias, StringComparison.OrdinalIgnoreCase)))
+        // Check if alias already exists for this model (using normalized version)
+        if (model.Aliases.Any(a => a.Equals(normalizedAlias, StringComparison.OrdinalIgnoreCase)))
         {
-            _logger.Warning("Alias '{Alias}' already exists for model '{Model}'", alias, model.Name);
+            _logger.Warning("Alias '{Alias}' already exists for model '{Model}'", normalizedAlias, model.Name);
             return;
         }
         
-        // Validate uniqueness
-        var validation = ValidateAliasUniqueness(settings, alias, model.Id);
+        // Validate uniqueness (using normalized alias)
+        var validation = ValidateAliasUniqueness(settings, normalizedAlias, model.Id);
         if (!validation.IsValid)
             throw new InvalidOperationException(validation.ErrorMessage);
         
-        // Add the alias
-        model.Aliases.Add(alias);
+        // Add the normalized alias (without @ prefix)
+        model.Aliases.Add(normalizedAlias);
         await UpdateModelAsync(model);
         
-        _logger.Success($"{Constants.UI.CheckMark} Added alias '{alias}' to model '{model.Name}'");
+        _logger.Success($"{Constants.UI.CheckMark} Added alias '@{normalizedAlias}' to model '{model.Name}'");
     }
 
     /// <inheritdoc />
@@ -403,6 +424,10 @@ public class SecureConfigurationService : ISecureConfigurationService
     {
         if (string.IsNullOrWhiteSpace(alias))
             throw new ArgumentException("Alias cannot be empty or whitespace", nameof(alias));
+        
+        // Normalize alias by removing @ prefix if present
+        var normalizedAlias = alias.TrimStart('@');
+        _logger.Debug($"RemoveAliasAsync: normalizing '{alias}' to '{normalizedAlias}'");
         
         var model = await GetModelAsync(modelNameOrId);
         
@@ -415,17 +440,17 @@ public class SecureConfigurationService : ISecureConfigurationService
             return;
         }
         
-        // Remove alias (case-insensitive)
-        var removed = model.Aliases.RemoveAll(a => a.Equals(alias, StringComparison.OrdinalIgnoreCase));
+        // Remove alias (case-insensitive, using normalized version)
+        var removed = model.Aliases.RemoveAll(a => a.Equals(normalizedAlias, StringComparison.OrdinalIgnoreCase));
         
         if (removed == 0)
         {
-            _logger.Warning("Alias '{Alias}' not found for model '{Model}'", alias, model.Name);
+            _logger.Warning("Alias '{Alias}' not found for model '{Model}'", normalizedAlias, model.Name);
             return;
         }
         
         await UpdateModelAsync(model);
-        _logger.Success($"{Constants.UI.CheckMark} Removed alias '{alias}' from model '{model.Name}'");
+        _logger.Success($"{Constants.UI.CheckMark} Removed alias '@{normalizedAlias}' from model '{model.Name}'");
     }
 
     /// <inheritdoc />
@@ -449,11 +474,18 @@ public class SecureConfigurationService : ISecureConfigurationService
             return new List<ModelConfiguration>();
         }
         
+        // Normalize the partial string by removing @ prefix if present
+        var normalizedPartial = partial.TrimStart('@');
+        
         // Find models where name or any alias starts with the partial string (case-insensitive)
+        // Check both with and without @ prefix for robustness
         var matches = settings.Models.Where(m =>
             m.Name.StartsWith(partial, StringComparison.OrdinalIgnoreCase) ||
+            m.Name.StartsWith(normalizedPartial, StringComparison.OrdinalIgnoreCase) ||
             (m.Aliases != null && m.Aliases.Any(alias => 
-                alias.StartsWith(partial, StringComparison.OrdinalIgnoreCase)))
+                alias.StartsWith(partial, StringComparison.OrdinalIgnoreCase) ||
+                alias.StartsWith(normalizedPartial, StringComparison.OrdinalIgnoreCase) ||
+                ("@" + alias).StartsWith(partial, StringComparison.OrdinalIgnoreCase)))
         ).ToList();
         
         _logger.Debug($"Partial match results for '{partial}': {matches.Count} matches");

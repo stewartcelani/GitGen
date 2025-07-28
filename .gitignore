@@ -286,3 +286,10 @@ appsettings.secret.json
 
 # Test Results
 TestResults/
+*.trx
+*.coverage
+*.cobertura.xml
+
+# Visual Studio Test Results
+*.testlog
+*.testsettings
