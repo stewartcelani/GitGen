@@ -19,8 +19,8 @@ public class ModelConfiguration
     ///     Gets or sets the user-friendly name for this model (e.g., "gpt-4-turbo", "claude-work").
     ///     Setting this also updates the Id property.
     /// </summary>
-    public string Name 
-    { 
+    public string Name
+    {
         get => _name;
         set
         {
@@ -174,14 +174,14 @@ public class ModelConfiguration
         }
 
         // Check if any alias contains "free" or "public" (case-insensitive)
-        if (Aliases.Any(alias => alias.Contains("free", StringComparison.OrdinalIgnoreCase) || 
+        if (Aliases.Any(alias => alias.Contains("free", StringComparison.OrdinalIgnoreCase) ||
                                  alias.Contains("public", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
 
         // Check if the note/description contains indicators
-        if (!string.IsNullOrWhiteSpace(Note) && 
+        if (!string.IsNullOrWhiteSpace(Note) &&
             (Note.Contains("free", StringComparison.OrdinalIgnoreCase) ||
              Note.Contains("public", StringComparison.OrdinalIgnoreCase) ||
              Note.Contains("PUBLIC REPO", StringComparison.OrdinalIgnoreCase)))

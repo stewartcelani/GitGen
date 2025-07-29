@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -217,7 +218,7 @@ public class HttpClientService : IHttpClientService
             if (!response.IsSuccessStatusCode)
             {
                 var responseBody = await response.Content.ReadAsStringAsync();
-                
+
                 // Log error if not suppressed
                 if (!options.SuppressErrorLogging)
                 {
@@ -284,7 +285,7 @@ public class HttpClientService : IHttpClientService
 
             // Format base error message
             var baseMessage = $"HTTP {statusCodeInt} {statusCode} from {url}";
-            
+
             if (!string.IsNullOrEmpty(options.ErrorContext))
             {
                 baseMessage += $" ({options.ErrorContext})";
@@ -309,7 +310,7 @@ public class HttpClientService : IHttpClientService
                 case ErrorDetailLevel.Verbose:
                     _logger.Error($"❌ {baseMessage}");
                     _logger.Error($"   Method: {method}");
-                    
+
                     var verboseErrorMessage = ExtractErrorMessage(responseBody);
                     if (!string.IsNullOrEmpty(verboseErrorMessage))
                     {
@@ -384,7 +385,7 @@ public class HttpClientService : IHttpClientService
         {
             // Check common headers for request ID
             var headers = new[] { "x-request-id", "request-id", "x-amzn-requestid", "x-ms-request-id" };
-            
+
             foreach (var header in headers)
             {
                 if (response.Headers.TryGetValues(header, out var values))
@@ -396,16 +397,17 @@ public class HttpClientService : IHttpClientService
             return null;
         }
 
+        [RequiresUnreferencedCode("Calls System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)")]
         private void FormatJsonResponse(string responseBody)
         {
             try
             {
                 using var doc = JsonDocument.Parse(responseBody);
-                var formatted = JsonSerializer.Serialize(doc, new JsonSerializerOptions 
-                { 
-                    WriteIndented = true 
+                var formatted = JsonSerializer.Serialize(doc, new JsonSerializerOptions
+                {
+                    WriteIndented = true
                 });
-                
+
                 foreach (var line in formatted.Split('\n'))
                 {
                     _logger.Error($"   {line}");

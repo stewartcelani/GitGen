@@ -61,7 +61,7 @@ public class ContextLengthExceededException : Exception
     {
         // Parse patterns like:
         // "This model's maximum context length is 4097 tokens. However, you requested 4927 tokens (3927 in the messages, 1000 in the completion)."
-        
+
         int? maxContext = null;
         int? requested = null;
         int? prompt = null;
@@ -69,7 +69,7 @@ public class ContextLengthExceededException : Exception
 
         // Extract max context length
         var maxContextMatch = System.Text.RegularExpressions.Regex.Match(
-            apiErrorMessage, 
+            apiErrorMessage,
             @"maximum context length is (\d+) tokens");
         if (maxContextMatch.Success && int.TryParse(maxContextMatch.Groups[1].Value, out var max))
         {

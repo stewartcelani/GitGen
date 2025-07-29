@@ -447,11 +447,11 @@ public static class ValidationService
             {
                 var uri = new Uri(url, UriKind.Absolute);
                 var domain = uri.Host;
-                
+
                 // Remove www. prefix if present
                 if (domain.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
                     domain = domain.Substring(4);
-                
+
                 return domain;
             }
             catch
@@ -472,7 +472,7 @@ public static class ValidationService
                 return null;
 
             var lowerUrl = url.ToLowerInvariant();
-            
+
             // Check each provider pattern (case-insensitive)
             if (lowerUrl.StartsWith(Constants.Providers.XAIUrlPattern.ToLowerInvariant()))
                 return Constants.Providers.XAI;

@@ -12,7 +12,7 @@ public static class Constants
     {
         // Version Management
         public const string CurrentConfigVersion = "4.0";
-        
+
         // Provider Types
         public const string ProviderTypeOpenAI = "openai";
         public const string ProviderTypeOpenAICompatible = "openai-compatible";
@@ -216,7 +216,7 @@ public static class Constants
 
         // Formatting
         public const string TimestampFormat = "HH:mm:ss";
-        public const int DebugLevelPadding = 7;
+        public const int DebugLevelPadding = 0;
         public const string CommitMessageQuotes = "\"";
 
         // Configuration Section Header (kept for historical reference if needed)
@@ -230,16 +230,16 @@ public static class Constants
     {
         /// <summary>Short date pattern (e.g., 1/27/2025 for US, 27/01/2025 for AU)</summary>
         public const string ShortDate = "d";
-        
+
         /// <summary>Long date pattern (e.g., Monday, January 27, 2025 for US)</summary>
         public const string LongDate = "D";
-        
+
         /// <summary>Short date/time pattern (e.g., 1/27/2025 2:32 PM for US)</summary>
         public const string ShortDateTime = "g";
-        
+
         /// <summary>Short time pattern (e.g., 2:32 PM for US, 14:32 for many EU countries)</summary>
         public const string ShortTime = "t";
-        
+
         /// <summary>Invariant format for filenames and technical use (always yyyyMMddHHmmss)</summary>
         public const string InvariantFileTimestamp = "yyyyMMddHHmmss";
     }

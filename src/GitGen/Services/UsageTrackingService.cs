@@ -17,12 +17,12 @@ public class UsageTrackingService : IUsageTrackingService
     {
         _logger = logger;
         _sessionId = GenerateSessionId();
-        
+
         // Set up the usage directory
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _usageDirectory = Path.Combine(homeDir, ".gitgen", "usage");
         _logger.Debug($"Usage directory: {_usageDirectory}");
-        
+
         // Ensure directory exists
         Directory.CreateDirectory(_usageDirectory);
         _logger.Debug($"Usage directory created/verified: {Directory.Exists(_usageDirectory)}");

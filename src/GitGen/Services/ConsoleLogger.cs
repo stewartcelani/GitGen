@@ -24,7 +24,7 @@ public class ConsoleLogger : IConsoleLogger
     public void Debug(string message, params object[] args)
     {
         if (_debugMode)
-            WriteLog("DEBUG", ConsoleColor.Gray, message, args);
+            WriteLog("DEBUG", ConsoleColor.DarkGray, message, args);
     }
 
     /// <inheritdoc />
@@ -103,7 +103,7 @@ public class ConsoleLogger : IConsoleLogger
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.Write($"{timestamp} ");
         Console.ForegroundColor = color;
-        Console.Write($"[{level,Constants.UI.DebugLevelPadding}] ");
+        Console.Write($"[{level}] ");
         Console.WriteLine(Format(message, args));
         Console.ResetColor();
     }

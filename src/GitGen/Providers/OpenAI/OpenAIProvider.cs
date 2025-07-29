@@ -45,7 +45,7 @@ public class OpenAIProvider : ICommitMessageProvider
             modelConfig.RequiresAuth,
             callTracker,
             modelConfig);
-        
+
         // Debug: Log whether call tracker was provided
         _logger.Debug($"OpenAIProvider created with callTracker: {(_callTracker != null ? "provided" : "null")}");
     }
@@ -57,7 +57,7 @@ public class OpenAIProvider : ICommitMessageProvider
     public async Task<CommitMessageResult> GenerateCommitMessageAsync(string diff, string? customInstruction = null)
     {
         _logger.Debug($"GenerateCommitMessageAsync called, callTracker is {(_callTracker != null ? "available" : "null")}");
-        
+
         var systemPrompt = BuildSystemPrompt(customInstruction);
         var fullPrompt = $"System: {systemPrompt}\n\nUser: {diff}";
 
@@ -375,7 +375,7 @@ public class OpenAIProvider : ICommitMessageProvider
         catch (HttpResponseException ex)
         {
             // Check if this is a context length error
-            if (ex.ResponseBody != null && 
+            if (ex.ResponseBody != null &&
                 (ex.ResponseBody.Contains(Constants.Api.ContextLengthExceededError) ||
                  ex.ResponseBody.Contains("maximum context length")))
             {
@@ -452,7 +452,7 @@ public class OpenAIProvider : ICommitMessageProvider
             return false;
 
         return ex.Message.Contains(Constants.Api.ContextLengthExceededError) ||
-               (ex.Message.Contains(Constants.Api.InvalidRequestError) && 
+               (ex.Message.Contains(Constants.Api.InvalidRequestError) &&
                 ex.Message.Contains("maximum context length"));
     }
 

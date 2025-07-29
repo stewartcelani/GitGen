@@ -21,6 +21,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
     private readonly GitAnalysisService _gitService;
     private readonly CommitMessageGenerator _generator;
     private readonly GitDiffTruncationService _truncationService;
+    private readonly IConsoleInput _consoleInput;
 
     public GenerationOrchestrator(
         IConsoleLogger logger,
@@ -29,7 +30,8 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         ConfigurationWizardService wizardService,
         GitAnalysisService gitService,
         CommitMessageGenerator generator,
-        GitDiffTruncationService truncationService)
+        GitDiffTruncationService truncationService,
+        IConsoleInput consoleInput)
     {
         _logger = logger;
         _secureConfig = secureConfig;
@@ -38,6 +40,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         _gitService = gitService;
         _generator = generator;
         _truncationService = truncationService;
+        _consoleInput = consoleInput;
     }
 
     /// <inheritdoc />
@@ -47,7 +50,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         {
             // Track if a specific model was requested
             bool specificModelRequested = !string.IsNullOrEmpty(modelName);
-            
+
             // Load configuration
             var activeModel = await _configService.LoadConfigurationAsync(modelName);
 
@@ -67,7 +70,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
                 if (!specificModelRequested && _secureConfig != null && await _configService.NeedsDefaultModelHealingAsync())
                 {
                     _logger.Debug("Default model configuration needs healing");
-                    
+
                     // Attempt to heal the default model configuration
                     var healed = await _secureConfig.HealDefaultModelAsync(_logger);
                     if (healed)
@@ -173,12 +176,12 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             _logger.Information($"   • System prompt: ~{systemPromptSize:N0} tokens");
             _logger.Information($"   • Git diff: ~{diffTokens:N0} tokens");
             _logger.Information($"   • Total input: ~{totalTokens:N0} tokens");
-            
+
             // Estimate output tokens as midpoint of max output tokens
             var maxOutputTokens = activeModel.MaxOutputTokens;
             var estimatedOutputTokens = maxOutputTokens / 2;
             _logger.Information($"   • Estimated output: ~{estimatedOutputTokens:N0} tokens (midpoint of {maxOutputTokens:N0} max)");
-            
+
             // Show grand total with obvious color
             var grandTotal = totalTokens + estimatedOutputTokens;
             _logger.Highlight($"   • Total tokens: ~{grandTotal:N0} tokens", ConsoleColor.Yellow);
@@ -189,12 +192,12 @@ public class GenerationOrchestrator : IGenerationOrchestrator
                 var inputCost = (totalTokens / 1_000_000.0) * (double)activeModel.Pricing.InputPer1M;
                 var outputCost = (estimatedOutputTokens / 1_000_000.0) * (double)activeModel.Pricing.OutputPer1M;
                 var totalCost = inputCost + outputCost;
-                
+
                 // Use CostCalculationService to format with proper currency
                 var inputCostStr = CostCalculationService.FormatCurrency((decimal)inputCost, activeModel.Pricing.CurrencyCode, 4);
                 var outputCostStr = CostCalculationService.FormatCurrency((decimal)outputCost, activeModel.Pricing.CurrencyCode, 4);
                 var totalCostStr = CostCalculationService.FormatCurrency((decimal)totalCost, activeModel.Pricing.CurrencyCode, 4);
-                
+
                 _logger.Information($"💰 Estimated cost:");
                 _logger.Information($"   • Input: ~{inputCostStr}");
                 _logger.Information($"   • Output: ~{outputCostStr}");
@@ -217,7 +220,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             _logger.Error(ex, "Preview failed");
             _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.UnexpectedError}", ex.Message);
         }
-        
+
         return Task.CompletedTask;
     }
 
@@ -240,12 +243,12 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         _logger.Information($"   • System prompt: ~{systemPromptSize:N0} tokens");
         _logger.Information($"   • Git diff: ~{diffTokens:N0} tokens");
         _logger.Information($"   • Total input: ~{totalTokens:N0} tokens");
-        
+
         // Estimate output tokens as midpoint of max output tokens
         var maxOutputTokens = activeModel.MaxOutputTokens;
         var estimatedOutputTokens = maxOutputTokens / 2;
         _logger.Information($"   • Estimated output: ~{estimatedOutputTokens:N0} tokens (midpoint of {maxOutputTokens:N0} max)");
-        
+
         // Show grand total with obvious color
         var grandTotal = totalTokens + estimatedOutputTokens;
         _logger.Highlight($"   • Total tokens: ~{grandTotal:N0} tokens", ConsoleColor.Yellow);
@@ -256,12 +259,12 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             var inputCost = (totalTokens / 1_000_000.0) * (double)activeModel.Pricing.InputPer1M;
             var outputCost = (estimatedOutputTokens / 1_000_000.0) * (double)activeModel.Pricing.OutputPer1M;
             var totalCost = inputCost + outputCost;
-            
+
             // Use CostCalculationService to format with proper currency
             var inputCostStr = CostCalculationService.FormatCurrency((decimal)inputCost, activeModel.Pricing.CurrencyCode, 4);
             var outputCostStr = CostCalculationService.FormatCurrency((decimal)outputCost, activeModel.Pricing.CurrencyCode, 4);
             var totalCostStr = CostCalculationService.FormatCurrency((decimal)totalCost, activeModel.Pricing.CurrencyCode, 4);
-            
+
             _logger.Information($"💰 Estimated cost:");
             _logger.Information($"   • Input: ~{inputCostStr}");
             _logger.Information($"   • Output: ~{outputCostStr}");
@@ -279,7 +282,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
     private async Task GenerateCommitMessageAsync(ModelConfiguration activeModel, string? instruction)
     {
         string diff = "";
-        
+
         try
         {
             if (!_gitService.IsGitRepository())
@@ -297,7 +300,7 @@ public class GenerationOrchestrator : IGenerationOrchestrator
 
             // Get app settings to check if confirmation is required
             var settings = await _secureConfig.LoadSettingsAsync();
-            
+
             // Check if this is a free model and extra confirmation is required
             if (settings.Settings.RequireFreeModelConfirmation && activeModel.IsFreeModel())
             {
@@ -305,34 +308,36 @@ public class GenerationOrchestrator : IGenerationOrchestrator
                 _logger.Warning($"Model: {activeModel.Name}");
                 _logger.Warning("This model appears to be configured for public repositories only.");
                 Console.WriteLine();
-                
+
                 Console.Write("Are you sure you want to send your code to this model? (Y/n): ");
-                var freeModelConfirm = Console.ReadLine()?.Trim().ToLower();
-                
+                Console.Out.Flush();
+                var freeModelConfirm = _consoleInput.ReadLine()?.Trim().ToLower();
+
                 if (freeModelConfirm == "n" || freeModelConfirm == "no")
                 {
                     _logger.Information("Generation cancelled due to free model safety check.");
                     return;
                 }
-                
+
                 Console.WriteLine();
             }
-            
+
             // Show preview information if confirmation is required
             if (settings.Settings.RequirePromptConfirmation)
             {
                 ShowPreviewForConfirmation(activeModel, diff, instruction);
-                
+
                 Console.WriteLine();
                 Console.Write("Send to LLM? (Y/n): ");
-                var confirm = Console.ReadLine()?.Trim().ToLower();
-                
+                Console.Out.Flush();
+                var confirm = _consoleInput.ReadLine()?.Trim().ToLower();
+
                 if (confirm == "n" || confirm == "no")
                 {
                     _logger.Information("Generation cancelled.");
                     return;
                 }
-                
+
                 Console.WriteLine();
             }
 
@@ -353,20 +358,20 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             if (settings.Settings.ShowTokenUsage && result.InputTokens.HasValue && result.OutputTokens.HasValue)
             {
                 var tokenInfo = $"Generated with {result.InputTokens:N0} input tokens, {result.OutputTokens:N0} output tokens ({result.TotalTokens:N0} total)";
-                
+
                 // Add cost if pricing is configured
                 if (activeModel.Pricing != null)
                 {
                     var cost = CostCalculationService.CalculateAndFormatCost(
-                        activeModel, 
-                        result.InputTokens.Value, 
+                        activeModel,
+                        result.InputTokens.Value,
                         result.OutputTokens.Value);
                     if (!string.IsNullOrEmpty(cost))
                     {
                         tokenInfo += $" • Estimated cost: {cost}";
                     }
                 }
-                
+
                 _logger.Muted(tokenInfo);
                 Console.WriteLine();
             }
@@ -382,18 +387,18 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         {
             _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ContextLengthExceeded}");
             Console.WriteLine();
-            
+
             // Display detailed error information
             if (ex.MaxContextLength.HasValue)
             {
                 _logger.Information($"This model's maximum context length is {ex.MaxContextLength:N0} tokens");
             }
-            
+
             if (ex.RequestedTokens.HasValue)
             {
                 var tokenLabel = ex.PromptTokens.HasValue ? "" : "~";
                 _logger.Information($"Your request used {tokenLabel}{ex.RequestedTokens:N0} tokens:");
-                
+
                 if (ex.PromptTokens.HasValue && ex.CompletionTokens.HasValue)
                 {
                     _logger.Information($"   • Messages: {ex.PromptTokens:N0} tokens");
@@ -414,16 +419,17 @@ public class GenerationOrchestrator : IGenerationOrchestrator
                 var systemPromptSize = EstimateSystemPromptSize(activeModel, instruction);
                 var diffTokens = EstimateTokens(diff);
                 var totalTokens = systemPromptSize + diffTokens;
-                
+
                 _logger.Information($"Estimated tokens in your request: ~{totalTokens:N0}");
                 _logger.Information($"   • System prompt: ~{systemPromptSize:N0} tokens");
                 _logger.Information($"   • Git diff: ~{diffTokens:N0} tokens");
             }
-            
+
             Console.WriteLine();
             Console.Write(Constants.ErrorMessages.ContextLengthRetryPrompt);
-            
-            var confirm = Console.ReadLine()?.Trim().ToLower();
+            Console.Out.Flush();
+
+            var confirm = _consoleInput.ReadLine()?.Trim().ToLower();
             if (confirm == "y" || confirm == "yes")
             {
                 await GenerateWithTruncatedDiffAsync(activeModel, diff, instruction);
@@ -455,18 +461,18 @@ public class GenerationOrchestrator : IGenerationOrchestrator
     {
         _logger.Error($"{Constants.UI.CrossMark} Model or alias '{requestedAlias}' not found");
         Console.WriteLine();
-        
+
         var settings = await _secureConfig.LoadSettingsAsync();
-        
+
         if (!settings.Models.Any())
         {
             _logger.Information("No models configured. Run 'gitgen config' to add a model.");
             return;
         }
-        
+
         // Check if partial matching is enabled and filter suggestions
         var modelsToShow = settings.Models;
-        if (settings.Settings.EnablePartialAliasMatching && 
+        if (settings.Settings.EnablePartialAliasMatching &&
             requestedAlias.Length >= settings.Settings.MinimumAliasMatchLength)
         {
             var partialMatches = await _secureConfig.GetModelsByPartialMatchAsync(requestedAlias);
@@ -484,36 +490,36 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         {
             _logger.Information($"{Constants.UI.BulbSymbol} Did you mean one of these?");
         }
-        
+
         Console.WriteLine();
-        
+
         // Display filtered models with their details
         foreach (var model in modelsToShow.OrderBy(m => m.Name))
         {
             var defaultMarker = model.Id == settings.DefaultModelId ? " ⭐ (default)" : "";
             _logger.Success($"  {model.Name}{defaultMarker}");
-            
+
             // Show aliases if any
             if (model.Aliases != null && model.Aliases.Count > 0)
             {
                 var aliasesStr = string.Join(", ", model.Aliases.OrderBy(a => a).Select(a => $"@{a}"));
                 _logger.Information($"    Aliases: {aliasesStr}");
             }
-            
+
             // Show model details
             _logger.Muted($"    Type: {model.Type} | Provider: {model.Provider} | Model: {model.ModelId}");
             _logger.Muted($"    URL: {model.Url}");
-            
+
             // Show pricing if available
             if (model.Pricing != null)
             {
                 var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
                 _logger.Muted($"    Pricing: {pricingInfo}");
             }
-            
+
             Console.WriteLine();
         }
-        
+
         _logger.Information($"{Constants.UI.InfoSymbol} Usage examples:");
         _logger.Information("  gitgen @modelname");
         _logger.Information("  gitgen \"your prompt\" @modelname");
@@ -546,37 +552,38 @@ public class GenerationOrchestrator : IGenerationOrchestrator
 
             // Get the model's context limit (use a conservative default if not known)
             var contextLimit = activeModel.ContextLength ?? 128000;
-            
+
             // Estimate system prompt size
             var systemPromptTokens = EstimateSystemPromptSize(activeModel, instruction);
-            
+
             // Truncate the diff
             var truncatedDiff = _truncationService.TruncateDiff(originalDiff, contextLimit, systemPromptTokens);
-            
+
             _logger.Debug($"Truncated diff from {originalDiff.Length:N0} to {truncatedDiff.Length:N0} characters");
-            
+
             // Get app settings to check if confirmation is required
             var settings = await _secureConfig.LoadSettingsAsync();
-            
+
             // Show preview information if confirmation is required
             if (settings.Settings.RequirePromptConfirmation)
             {
                 _logger.Information("Truncated diff preview:");
                 ShowPreviewForConfirmation(activeModel, truncatedDiff, instruction);
-                
+
                 Console.WriteLine();
                 Console.Write("Send truncated diff to LLM? (Y/n): ");
-                var confirm = Console.ReadLine()?.Trim().ToLower();
-                
+                Console.Out.Flush();
+                var confirm = _consoleInput.ReadLine()?.Trim().ToLower();
+
                 if (confirm == "n" || confirm == "no")
                 {
                     _logger.Information("Generation cancelled.");
                     return;
                 }
-                
+
                 Console.WriteLine();
             }
-            
+
             // Generate with truncated diff
             var result = await _generator.GenerateAsync(activeModel, truncatedDiff, instruction);
 
@@ -592,20 +599,20 @@ public class GenerationOrchestrator : IGenerationOrchestrator
             if (settings.Settings.ShowTokenUsage && result.InputTokens.HasValue && result.OutputTokens.HasValue)
             {
                 var tokenInfo = $"Generated with {result.InputTokens:N0} input tokens, {result.OutputTokens:N0} output tokens ({result.TotalTokens:N0} total)";
-                
+
                 // Add cost if pricing is configured
                 if (activeModel.Pricing != null)
                 {
                     var cost = CostCalculationService.CalculateAndFormatCost(
-                        activeModel, 
-                        result.InputTokens.Value, 
+                        activeModel,
+                        result.InputTokens.Value,
                         result.OutputTokens.Value);
                     if (!string.IsNullOrEmpty(cost))
                     {
                         tokenInfo += $" • Estimated cost: {cost}";
                     }
                 }
-                
+
                 _logger.Muted(tokenInfo);
                 Console.WriteLine();
             }
@@ -635,19 +642,19 @@ public class GenerationOrchestrator : IGenerationOrchestrator
     {
         // Base prompt is approximately 1600 characters
         var basePromptSize = 1600;
-        
+
         // Add custom instruction if provided
         if (!string.IsNullOrWhiteSpace(customInstruction))
         {
             basePromptSize += customInstruction.Length;
         }
-        
+
         // Add model's custom system prompt if configured
         if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
         {
             basePromptSize += model.SystemPrompt.Length;
         }
-        
+
         return EstimateTokens(new string('x', basePromptSize));
     }
 }

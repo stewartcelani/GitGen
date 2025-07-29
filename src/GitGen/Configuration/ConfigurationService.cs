@@ -29,6 +29,8 @@ public class ConfigurationService
     /// <returns>The configuration for the specified or default model.</returns>
     public async Task<ModelConfiguration?> LoadConfigurationAsync(string? modelName = null)
     {
+        _logger.Debug($"LoadConfigurationAsync called with modelName: '{modelName ?? "(null)"}'");
+
         if (_secureConfig == null)
         {
             _logger.Error("Secure configuration service not available");
@@ -42,7 +44,7 @@ public class ConfigurationService
             _logger.Debug("No models configured in secure storage");
             return null;
         }
-        
+
         _logger.Debug("Found models in secure storage");
 
         ModelConfiguration? model;
@@ -124,28 +126,28 @@ public class ConfigurationService
             return false;
 
         var settings = await _secureConfig.LoadSettingsAsync();
-        
+
         // No models exist, so no healing possible
         if (settings.Models.Count == 0)
         {
             _logger.Debug("No models exist, healing not possible");
             return false;
         }
-        
+
         // Check if default model is missing or invalid
         if (string.IsNullOrEmpty(settings.DefaultModelId))
         {
             _logger.Debug("Default model ID is missing, healing needed");
             return true;
         }
-        
+
         // Check if default model ID points to non-existent model
         if (!settings.Models.Any(m => m.Id == settings.DefaultModelId))
         {
             _logger.Debug("Default model ID '{DefaultId}' points to non-existent model, healing needed", settings.DefaultModelId);
             return true;
         }
-        
+
         _logger.Debug("Default model configuration is valid");
         return false;
     }

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -16,7 +17,7 @@ public class UsageReportingService : IUsageReportingService
     public UsageReportingService(IConsoleLogger logger)
     {
         _logger = logger;
-        
+
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _usageDirectory = Path.Combine(homeDir, ".gitgen", "usage");
     }
@@ -24,7 +25,7 @@ public class UsageReportingService : IUsageReportingService
     public async Task<IEnumerable<UsageEntry>> GetUsageEntriesAsync(DateTime startDate, DateTime endDate)
     {
         var entries = new List<UsageEntry>();
-        
+
         if (!Directory.Exists(_usageDirectory))
         {
             return entries;
@@ -45,12 +46,12 @@ public class UsageReportingService : IUsageReportingService
                 foreach (var line in lines)
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
-                    
+
                     try
                     {
                         var entry = JsonSerializer.Deserialize(line, UsageJsonContext.Default.UsageEntry);
-                        if (entry != null && 
-                            entry.Timestamp.Date >= startDate.Date && 
+                        if (entry != null &&
+                            entry.Timestamp.Date >= startDate.Date &&
                             entry.Timestamp.Date <= endDate.Date)
                         {
                             entries.Add(entry);
@@ -116,12 +117,12 @@ public class UsageReportingService : IUsageReportingService
 
             var modelName = TruncateString(modelGroup.Key, 20);
             var costStr = CostCalculationService.FormatCurrency(cost, currency);
-            
+
             report.AppendLine($"│ {modelName,-20} │ {calls,8:N0} │ {FormatTokenCount(inputTokens),10} │ {FormatTokenCount(outputTokens),10} │ {FormatTokenCount(totalTokens),10} │ {avgTime,8:F1}s │ {costStr,10} │");
         }
 
         report.AppendLine("├──────────────────────┼──────────┼────────────┼────────────┼────────────┼──────────┼────────────┤");
-        
+
         var overallAvgTime = totalCalls > 0 ? totalDuration / totalCalls : 0;
         var totalCostStr = CostCalculationService.FormatCurrency(totalCost, "USD");
         report.AppendLine($"│ {"TOTAL",-20} │ {totalCalls,8:N0} │ {FormatTokenCount(totalInputTokens),10} │ {FormatTokenCount(totalOutputTokens),10} │ {FormatTokenCount(totalInputTokens + totalOutputTokens),10} │ {overallAvgTime,8:F1}s │ {totalCostStr,10} │");
@@ -165,7 +166,7 @@ public class UsageReportingService : IUsageReportingService
         foreach (var dayGroup in dailyGroups)
         {
             var modelGroups = dayGroup.GroupBy(e => e.Model.Name);
-            
+
             foreach (var modelGroup in modelGroups)
             {
                 var calls = modelGroup.Count();
@@ -187,23 +188,23 @@ public class UsageReportingService : IUsageReportingService
         // Monthly summary
         report.AppendLine("\nMonthly Summary:");
         report.AppendLine(new string('-', 50));
-        
+
         var totalCalls = entries.Count();
         var totalInputTokens = entries.Sum(e => e.Tokens.Input);
         var totalOutputTokens = entries.Sum(e => e.Tokens.Output);
         var totalTokens = entries.Sum(e => e.Tokens.Total);
-        
+
         report.AppendLine($"Total calls: {totalCalls:N0}");
         report.AppendLine($"Total tokens: {totalTokens:N0} (Input: {totalInputTokens:N0}, Output: {totalOutputTokens:N0})");
         report.AppendLine($"Total cost: {CostCalculationService.FormatCurrency(monthlyTotalCost, "USD")}");
-        
+
         // Top models
         report.AppendLine("\nTop Models by Usage:");
         var topModels = entries.GroupBy(e => e.Model.Name)
             .Select(g => new { Model = g.Key, Count = g.Count(), Cost = g.Where(e => e.Cost != null).Sum(e => e.Cost!.Amount) })
             .OrderByDescending(x => x.Count)
             .Take(5);
-        
+
         foreach (var model in topModels)
         {
             report.AppendLine($"  {model.Model}: {model.Count} calls, {CostCalculationService.FormatCurrency(model.Cost, "USD")}");
@@ -212,6 +213,7 @@ public class UsageReportingService : IUsageReportingService
         return report.ToString();
     }
 
+    [RequiresUnreferencedCode("JSON serialization may require unreferenced code")]
     public async Task<string> GenerateCustomReportAsync(DateTime startDate, DateTime endDate, string? modelFilter = null, bool outputJson = false)
     {
         var entries = await GetUsageEntriesAsync(startDate, endDate);
@@ -314,7 +316,7 @@ public class UsageReportingService : IUsageReportingService
         }
         return tokens.ToString();
     }
-    
+
     private static string TruncateString(string str, int maxLength)
     {
         if (str.Length <= maxLength)

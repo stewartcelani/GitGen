@@ -94,23 +94,23 @@ public static class CostCalculationService
     public static string FormatCurrency(decimal amount, string currencyCode)
     {
         var symbol = GetCurrencySymbol(currencyCode);
-        
+
         // Special formatting for certain currencies
         return currencyCode switch
         {
             // Currencies that typically show symbol after amount
-            "SEK" or "NOK" or "DKK" or "CZK" or "PLN" or "HUF" or "RON" or "BGN" or "HRK" 
+            "SEK" or "NOK" or "DKK" or "CZK" or "PLN" or "HUF" or "RON" or "BGN" or "HRK"
                 => $"{amount:F2} {symbol}",
-            
+
             // Currencies with no decimal places
-            "JPY" or "KRW" or "VND" or "IDR" or "CLP" or "COP" or "HUF" 
+            "JPY" or "KRW" or "VND" or "IDR" or "CLP" or "COP" or "HUF"
                 => $"{symbol}{amount:F0}",
-            
+
             // Default: symbol before amount with 2 decimal places
             _ => $"{symbol}{amount:F2}"
         };
     }
-    
+
     /// <summary>
     ///     Formats a currency amount with the appropriate symbol and specified decimal places.
     /// </summary>
@@ -122,18 +122,18 @@ public static class CostCalculationService
     {
         var symbol = GetCurrencySymbol(currencyCode);
         var format = $"F{decimalPlaces}";
-        
+
         // Special formatting for certain currencies
         return currencyCode switch
         {
             // Currencies that typically show symbol after amount
-            "SEK" or "NOK" or "DKK" or "CZK" or "PLN" or "HUF" or "RON" or "BGN" or "HRK" 
+            "SEK" or "NOK" or "DKK" or "CZK" or "PLN" or "HUF" or "RON" or "BGN" or "HRK"
                 => $"{amount.ToString(format)} {symbol}",
-            
+
             // Currencies with no decimal places (override decimalPlaces)
-            "JPY" or "KRW" or "VND" or "IDR" or "CLP" or "COP" or "HUF" 
+            "JPY" or "KRW" or "VND" or "IDR" or "CLP" or "COP" or "HUF"
                 => $"{symbol}{amount:F0}",
-            
+
             // Default: symbol before amount with specified decimal places
             _ => $"{symbol}{amount.ToString(format)}"
         };
@@ -161,17 +161,17 @@ public static class CostCalculationService
         var decimalIndex = str.IndexOf('.');
         if (decimalIndex < 0)
             return 0;
-            
+
         var decimalPlaces = str.Length - decimalIndex - 1;
-        
+
         // Remove trailing zeros to get actual significant decimal places
         str = str.TrimEnd('0');
         decimalPlaces = str.Length - decimalIndex - 1;
-        
+
         // Cap at 4 decimal places max, default to 2 if less than 2
         return Math.Max(2, Math.Min(decimalPlaces, 4));
     }
-    
+
     /// <summary>
     ///     Formats the pricing information for display.
     /// </summary>
@@ -182,14 +182,14 @@ public static class CostCalculationService
         // If both costs are 0, display "Free"
         if (pricing.InputPer1M == 0 && pricing.OutputPer1M == 0)
             return "Free";
-        
+
         // Detect decimal places from the actual values (minimum 2, maximum 4)
         var inputDecimals = GetDecimalPlaces(pricing.InputPer1M);
         var outputDecimals = GetDecimalPlaces(pricing.OutputPer1M);
-        
+
         var inputFormatted = FormatCurrency(pricing.InputPer1M, pricing.CurrencyCode, inputDecimals);
         var outputFormatted = FormatCurrency(pricing.OutputPer1M, pricing.CurrencyCode, outputDecimals);
-        
+
         return $"Input: {inputFormatted}/M, Output: {outputFormatted}/M";
     }
 

@@ -339,11 +339,11 @@ public class ConfigurationWizardService
         // Check if this will be the first (and thus default) model
         var settings = await _secureConfigService!.LoadSettingsAsync();
         bool isFirstModel = settings.Models.Count == 0;
-        
+
         // Save the model
         await _secureConfigService!.AddModelAsync(model);
         _logger.Success($"{Constants.UI.CheckMark} Model '{model.Name}' saved successfully!");
-        
+
         // Warn if this is the first model and appears to be for public/free use
         if (isFirstModel && AppearsToBePublicModel(model))
         {
@@ -355,7 +355,7 @@ public class ConfigurationWizardService
             _logger.Information("   Consider adding a secure model and setting it as default for private repositories.");
             _logger.Information("   You can change the default model anytime using 'gitgen config'.");
         }
-        
+
         return model;
     }
 
@@ -412,16 +412,16 @@ public class ConfigurationWizardService
         _logger.Warning("   sending private code to public APIs. Always use explicit model selection");
         _logger.Warning("   (e.g., 'gitgen @free') when working with public repositories.");
         _logger.Information("");
-        
+
         // Suggest a dash-stripped alias if the model name contains dashes
-        var suggestedAlias = model.Name.Contains('-') 
-            ? model.Name.Replace("-", "").ToLower() 
+        var suggestedAlias = model.Name.Contains('-')
+            ? model.Name.Replace("-", "").ToLower()
             : string.Empty;
-        
-        var aliasInput = suggestedAlias != string.Empty 
+
+        var aliasInput = suggestedAlias != string.Empty
             ? Prompt($"Enter aliases (comma-separated) [{suggestedAlias}]:", suggestedAlias)
             : Prompt("Enter aliases (comma-separated) [none]:", "");
-        
+
         if (string.IsNullOrWhiteSpace(aliasInput))
         {
             // If there's a suggested alias, use it; otherwise, leave aliases empty
@@ -435,46 +435,46 @@ public class ConfigurationWizardService
             }
             return true;
         }
-        
+
         // Parse and validate aliases
         var aliases = aliasInput.Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(a => a.Trim())
             .Where(a => !string.IsNullOrWhiteSpace(a))
             .ToList();
-        
+
         var validatedAliases = new List<string>();
         var settings = await _secureConfigService!.LoadSettingsAsync();
-        
+
         foreach (var alias in aliases)
         {
             // Normalize alias - remove @ if present, we'll add it back
             var normalizedAlias = alias.TrimStart('@');
-            
+
             // Check if it conflicts with existing model names
-            var existingModel = settings.Models.FirstOrDefault(m => 
+            var existingModel = settings.Models.FirstOrDefault(m =>
                 m.Name.Equals(normalizedAlias, StringComparison.OrdinalIgnoreCase));
             if (existingModel != null)
             {
                 _logger.Warning($"Alias '@{normalizedAlias}' conflicts with existing model name '{existingModel.Name}'. Skipping.");
                 continue;
             }
-            
+
             // Check if alias already exists in any model
-            var conflictingModel = settings.Models.FirstOrDefault(m => 
-                m.Aliases != null && m.Aliases.Any(a => 
+            var conflictingModel = settings.Models.FirstOrDefault(m =>
+                m.Aliases != null && m.Aliases.Any(a =>
                     a.Equals(normalizedAlias, StringComparison.OrdinalIgnoreCase)));
             if (conflictingModel != null)
             {
                 _logger.Warning($"Alias '@{normalizedAlias}' is already used by model '{conflictingModel.Name}'. Skipping.");
                 continue;
             }
-            
+
             validatedAliases.Add(normalizedAlias);
         }
-        
+
         // Set the validated aliases (can be empty)
         model.Aliases = validatedAliases;
-        
+
         if (validatedAliases.Count > 0)
         {
             _logger.Success($"✅ Configured aliases: {string.Join(", ", validatedAliases.Select(a => $"@{a}"))}");
@@ -483,7 +483,7 @@ public class ConfigurationWizardService
         {
             _logger.Information("ℹ️ No aliases configured for this model.");
         }
-        
+
         return true;
     }
 
@@ -494,13 +494,13 @@ public class ConfigurationWizardService
         _logger.Information("");
         _logger.Highlight("Step 3: Add a description for this model (optional).", ConsoleColor.Yellow);
         _logger.Muted("This helps you remember what this model is best used for.");
-        
+
         var note = Prompt("Enter description [none]:", "");
         if (!string.IsNullOrWhiteSpace(note))
         {
             model.Note = note;
         }
-        
+
         await Task.CompletedTask;
     }
 
@@ -541,7 +541,7 @@ public class ConfigurationWizardService
         {
             case "1": // OpenAI
                 model.Url = Constants.Configuration.DefaultOpenAIBaseUrl;
-                
+
                 // Check if URL matches a known provider
                 var openAIProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
                 if (!string.IsNullOrEmpty(openAIProvider))
@@ -561,10 +561,10 @@ public class ConfigurationWizardService
                 break;
             case "2": // Custom with Auth
                 model.Url = Prompt("Enter the provider's chat completions URL:");
-                
+
                 // Check if URL matches a known provider
                 var knownProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
-                
+
                 if (!string.IsNullOrEmpty(knownProvider))
                 {
                     model.Provider = knownProvider;
@@ -576,14 +576,14 @@ public class ConfigurationWizardService
                     var customDomain = ValidationService.DomainExtractor.ExtractDomain(model.Url) ?? "custom";
                     model.Provider = Prompt($"Provider name [{customDomain}]:", customDomain);
                 }
-                
+
                 model.ModelId = Prompt("Enter the model ID used by the provider's API:");
                 model.ApiKey = PromptForApiKey("Enter the provider's API Key:", null);
                 model.RequiresAuth = true;
                 break;
             case "3": // Local/No Auth
                 model.Url = Prompt("Enter your custom provider's chat completions URL:", Constants.Configuration.DefaultLocalBaseUrl);
-                
+
                 // Check if URL matches a known provider
                 var knownLocalProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
                 if (!string.IsNullOrEmpty(knownLocalProvider))
@@ -597,7 +597,7 @@ public class ConfigurationWizardService
                     var localDomain = ValidationService.DomainExtractor.ExtractDomain(model.Url) ?? "localhost";
                     model.Provider = Prompt($"Provider name [{localDomain}]:", localDomain);
                 }
-                
+
                 model.ModelId = Prompt("Enter the model ID used by the provider's API (e.g., llama3):");
                 model.RequiresAuth = false;
                 model.ApiKey = Constants.Fallbacks.NotRequiredValue;
@@ -647,14 +647,14 @@ public class ConfigurationWizardService
         _logger.Information("");
         _logger.Highlight("Step 7: Test the configuration.", ConsoleColor.Yellow);
         _logger.Information("Testing your configuration and detecting optimal API parameters...");
-        
+
         const int maxAttempts = 3;
         int attempt = 0;
-        
+
         while (attempt < maxAttempts)
         {
             attempt++;
-            
+
             try
             {
                 var provider = _providerFactory.CreateProvider(model);
@@ -663,7 +663,7 @@ public class ConfigurationWizardService
                 if (!success)
                 {
                     // Error details have already been shown by parameter detector
-                    
+
                     if (attempt < maxAttempts)
                     {
                         var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
@@ -673,7 +673,7 @@ public class ConfigurationWizardService
                             continue;
                         }
                     }
-                    
+
                     return false;
                 }
 
@@ -706,7 +706,7 @@ public class ConfigurationWizardService
             catch (HttpResponseException httpEx) when (httpEx.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
                 _logger.Warning("⚠️  Rate limited by the API provider. This is common with free models.");
-                
+
                 if (attempt < maxAttempts)
                 {
                     _logger.Information("The API's built-in retry mechanism will handle rate limiting automatically.");
@@ -718,7 +718,7 @@ public class ConfigurationWizardService
                         continue;
                     }
                 }
-                
+
                 // Rate limiting error already shown
                 return false;
             }
@@ -730,7 +730,7 @@ public class ConfigurationWizardService
                     _logger.Error($"❌ Unexpected error: {ex.Message}");
                 }
                 // Otherwise, error was already shown by parameter detector
-                
+
                 if (attempt < maxAttempts)
                 {
                     var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
@@ -739,11 +739,11 @@ public class ConfigurationWizardService
                         continue;
                     }
                 }
-                
+
                 return false;
             }
         }
-        
+
         // All retries exhausted
         return false;
     }
@@ -821,7 +821,7 @@ public class ConfigurationWizardService
         {
             model.SystemPrompt = systemPrompt;
         }
-        
+
         await Task.CompletedTask;
     }
 
@@ -834,32 +834,32 @@ public class ConfigurationWizardService
         _logger.Information("");
         _logger.Information("📋 Model Configuration Summary:");
         _logger.Information($"   Name: {model.Name}");
-        
+
         // Display aliases
         if (model.Aliases != null && model.Aliases.Count > 0)
             _logger.Information($"   Aliases: {string.Join(", ", model.Aliases)}");
-        
+
         // Display note/description
         if (!string.IsNullOrWhiteSpace(model.Note))
             _logger.Information($"   Description: {model.Note}");
-        
+
         _logger.Information($"   Type: {model.Type}");
         _logger.Information($"   Provider: {model.Provider}");
         _logger.Information($"   URL: {model.Url}");
         _logger.Information($"   Model ID: {model.ModelId}");
         _logger.Information($"   API Key: {ValidationService.ApiKey.Mask(model.ApiKey)}");
         _logger.Information($"   Max Tokens: {model.MaxOutputTokens}");
-        
+
         // Display pricing with currency symbol
         var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
         _logger.Information($"   Pricing: {pricingInfo}");
         _logger.Information($"   Currency: {model.Pricing.CurrencyCode} ({CostCalculationService.GetCurrencySymbol(model.Pricing.CurrencyCode)})");
-        
+
         // Display system prompt
         if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
         {
-            var truncatedPrompt = model.SystemPrompt.Length > 50 
-                ? model.SystemPrompt.Substring(0, 50) + "..." 
+            var truncatedPrompt = model.SystemPrompt.Length > 50
+                ? model.SystemPrompt.Substring(0, 50) + "..."
                 : model.SystemPrompt;
             _logger.Information($"   System Prompt: {truncatedPrompt}");
         }
@@ -867,10 +867,10 @@ public class ConfigurationWizardService
         {
             _logger.Information($"   System Prompt: (default)");
         }
-        
+
         _logger.Information("");
     }
-    
+
     /// <summary>
     ///     Checks if a model appears to be configured for public/free use based on its aliases and description.
     /// </summary>
@@ -878,7 +878,7 @@ public class ConfigurationWizardService
     {
         // Keywords that suggest public/free usage
         string[] publicKeywords = { "free", "public", "open" };
-        
+
         // Check aliases
         if (model.Aliases != null)
         {
@@ -888,28 +888,28 @@ public class ConfigurationWizardService
                     return true;
             }
         }
-        
+
         // Check note/description
         if (!string.IsNullOrWhiteSpace(model.Note))
         {
             if (publicKeywords.Any(keyword => model.Note.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
                 return true;
         }
-        
+
         // Check if it's a known free provider endpoint
         if (!string.IsNullOrWhiteSpace(model.Url))
         {
             // Check for common free model endpoints
-            if (model.Url.Contains("openrouter", StringComparison.OrdinalIgnoreCase) && 
+            if (model.Url.Contains("openrouter", StringComparison.OrdinalIgnoreCase) &&
                 model.ModelId != null && model.ModelId.Contains(":free", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
-        
+
         // Check if pricing indicates it's free
-        if (model.Pricing.InputPer1M == 0 && 
+        if (model.Pricing.InputPer1M == 0 &&
             model.Pricing.OutputPer1M == 0)
             return true;
-        
+
         return false;
     }
 }

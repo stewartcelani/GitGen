@@ -9,10 +9,10 @@ namespace GitGen.Services;
 public class GitDiffTruncationService
 {
     private readonly IConsoleLogger _logger;
-    
+
     // Conservative estimate: 3 characters per token for safety
     private const int CharsPerToken = 3;
-    
+
     // Regex patterns for parsing git diff
     private static readonly Regex FileHeaderPattern = new(@"^diff --git a/.+ b/.+$", RegexOptions.Multiline);
     private static readonly Regex HunkHeaderPattern = new(@"^@@.*@@", RegexOptions.Multiline);
@@ -33,15 +33,15 @@ public class GitDiffTruncationService
     {
         // Calculate available tokens for the diff
         var availableTokens = maxTokens - systemPromptTokens;
-        
+
         // Reserve some tokens for safety margin (10%)
         var targetTokens = (int)(availableTokens * 0.9);
-        
+
         // Convert to character limit
         var targetChars = targetTokens * CharsPerToken;
-        
+
         _logger.Debug($"Truncating diff: original length={diff.Length}, target chars={targetChars}");
-        
+
         if (diff.Length <= targetChars)
         {
             return diff;
@@ -49,7 +49,7 @@ public class GitDiffTruncationService
 
         // Parse the diff into files
         var files = ParseDiffIntoFiles(diff);
-        
+
         if (files.Count == 0)
         {
             // Fallback: simple truncation
@@ -123,7 +123,7 @@ public class GitDiffTruncationService
 
             // Skip the header (already added)
             var contentWithoutHeader = file.Content.Substring(file.Header.Length).TrimStart('\n');
-            
+
             if (contentWithoutHeader.Length <= remainingSpace)
             {
                 // Can fit entire file content
@@ -181,7 +181,7 @@ public class GitDiffTruncationService
         // Find a good truncation point (preferably at a line boundary)
         var truncateAt = Math.Min(diff.Length, targetChars);
         var lastNewline = diff.LastIndexOf('\n', truncateAt);
-        
+
         if (lastNewline > targetChars / 2) // Only use if we're not losing too much
         {
             truncateAt = lastNewline;

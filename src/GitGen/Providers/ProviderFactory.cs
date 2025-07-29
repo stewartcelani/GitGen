@@ -36,7 +36,7 @@ public class ProviderFactory
         // Handle null case for test mocking scenarios
         if (modelConfig == null)
             return null!;
-            
+
         var type = modelConfig.Type?.ToLowerInvariant();
 
         return type switch

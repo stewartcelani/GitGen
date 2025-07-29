@@ -193,10 +193,10 @@ public class OpenAIParameterDetector
             Model = model,
             Messages = new[] { new Message { Role = "user", Content = Constants.Api.TestPrompt } }
         };
-        
+
         _logger.Debug("Created test request for model: {Model}", model);
         _logger.Debug("Test prompt: {Prompt}", Constants.Api.TestPrompt);
-        
+
         return request;
     }
 
@@ -209,10 +209,10 @@ public class OpenAIParameterDetector
     private async Task<HttpResponseMessage> SendRequestAsync(OpenAIRequest request)
     {
         var jsonPayload = JsonSerializer.Serialize(request, OpenAIJsonContext.Default.OpenAIRequest);
-        
+
         _logger.Debug("Sending test request to: {Url}", _baseUrl);
         _logger.Debug("Request payload: {Payload}", jsonPayload);
-        
+
         // Create Uri object first to ensure proper parsing
         Uri requestUri;
         try
@@ -220,12 +220,12 @@ public class OpenAIParameterDetector
             // Trim any whitespace that might have been added
             var trimmedUrl = _baseUrl?.Trim();
             _logger.Debug("Trimmed URL: '{Url}'", trimmedUrl);
-            
+
             if (string.IsNullOrWhiteSpace(trimmedUrl))
             {
                 throw new InvalidOperationException("URL is null or empty");
             }
-            
+
             requestUri = new Uri(trimmedUrl, UriKind.Absolute);
             _logger.Debug("Successfully created Uri object: {Uri}", requestUri.ToString());
         }
@@ -238,7 +238,7 @@ public class OpenAIParameterDetector
             _logger.Error("");
             throw new InvalidOperationException($"Invalid URL format: {ex.Message}", ex);
         }
-        
+
         HttpRequestMessage httpRequest;
         try
         {
@@ -278,7 +278,7 @@ public class OpenAIParameterDetector
         }
         else
         {
-            _logger.Debug("No authentication headers added (requiresAuth: {RequiresAuth}, hasApiKey: {HasApiKey})", 
+            _logger.Debug("No authentication headers added (requiresAuth: {RequiresAuth}, hasApiKey: {HasApiKey})",
                 _requiresAuth, !string.IsNullOrEmpty(_apiKey));
         }
 
@@ -318,7 +318,7 @@ public class OpenAIParameterDetector
             _logger.Error($"❌ Invalid URI Error: {ex.Message}");
             _logger.Error($"   URL: '{_baseUrl}'");
             _logger.Error($"   URL Length: {_baseUrl?.Length ?? 0}");
-            
+
             // Check for common issues
             if (_baseUrl != null)
             {
@@ -328,13 +328,13 @@ public class OpenAIParameterDetector
                 {
                     _logger.Error("   ⚠️  URL contains invisible control characters");
                 }
-                
+
                 // Show hex dump of first few characters to debug encoding issues
                 var firstChars = _baseUrl.Take(50).ToArray();
                 var hexDump = string.Join(" ", firstChars.Select(c => $"{(int)c:X2}"));
                 _logger.Debug("   Hex dump (first 50 chars): {HexDump}", hexDump);
             }
-            
+
             _logger.Error("   💡 Try re-entering the URL or check for copy-paste issues");
             _logger.Error("");
             throw new HttpRequestException($"Invalid URI: {ex.Message}", ex);

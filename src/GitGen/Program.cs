@@ -29,29 +29,46 @@ internal class Program
     /// <returns>Processed arguments with @model converted to --model option.</returns>
     internal static string[] PreprocessArguments(string[] args)
     {
-        // Pre-parse arguments to handle @model syntax
         string? modelNameFromAlias = null;
-        var processedArgs = new List<string>(args.Length);
+        var processedArgs = new List<string>();
+        var pendingPromptParts = new List<string>();
 
-        foreach (var arg in args)
+        for (int i = 0; i < args.Length; i++)
         {
-            // An alias is only detected if the entire argument begins with '@'.
-            // This correctly ignores '@' symbols inside a quoted prompt.
+            var arg = args[i];
+
+            // Check if this is an @model reference
             if (arg.StartsWith("@") && arg.Length > 1)
             {
-                // Capture the model name (e.g., "fast" from "@fast").
-                // If multiple @aliases are used, the last one wins.
+                // Extract model name
                 modelNameFromAlias = arg.Substring(1);
+                continue; // Don't add to processed args
+            }
+
+            // Check if this is an option (starts with - or --)
+            if (arg.StartsWith("-"))
+            {
+                processedArgs.Add(arg);
+
+                // Check if this option takes a value
+                if (i + 1 < args.Length && !args[i + 1].StartsWith("-") && !args[i + 1].StartsWith("@"))
+                {
+                    // This could be an option value, but we need to be careful
+                    // For boolean options like -d, we shouldn't consume the next arg
+                    // For now, just add the option and continue
+                }
             }
             else
             {
-                // This is part of the prompt.
-                processedArgs.Add(arg);
+                // This is part of the prompt
+                pendingPromptParts.Add(arg);
             }
         }
 
-        // If an @-alias was found, inject it back into the argument list
-        // as a standard, hidden option that System.CommandLine can parse safely.
+        // Add all prompt parts
+        processedArgs.AddRange(pendingPromptParts);
+
+        // If a model was specified via @alias, add it as a proper option
         if (!string.IsNullOrEmpty(modelNameFromAlias))
         {
             processedArgs.Add("--model");
@@ -68,10 +85,22 @@ internal class Program
     private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
-        
+
+        // Debug raw arguments
+        if (args.Contains("-d") || args.Contains("--debug"))
+        {
+            Console.WriteLine($"[DEBUG] Raw args: [{string.Join(", ", args.Select(a => $"'{a}'"))}]");
+        }
+
         // Preprocess arguments to handle @model syntax
         var processedArgs = PreprocessArguments(args);
-        
+
+        // Debug processed arguments
+        if (args.Contains("-d") || args.Contains("--debug"))
+        {
+            Console.WriteLine($"[DEBUG] Processed args: [{string.Join(", ", processedArgs.Select(a => $"'{a}'"))}]");
+        }
+
         var serviceProvider = ConfigureServices();
         var rootCommand = BuildCommandLine(serviceProvider);
 
@@ -149,7 +178,8 @@ internal class Program
                     provider.GetRequiredService<ConfigurationWizardService>(),
                     provider.GetRequiredService<GitAnalysisService>(),
                     provider.GetRequiredService<CommitMessageGenerator>(),
-                    provider.GetRequiredService<GitDiffTruncationService>()))
+                    provider.GetRequiredService<GitDiffTruncationService>(),
+                    provider.GetRequiredService<IConsoleInput>()))
             .AddSingleton<IUsageReportingService>(provider =>
                 new UsageReportingService(factory.CreateLogger<UsageReportingService>()))
             .AddSingleton<IConsoleInput, SystemConsoleInput>()
@@ -201,12 +231,25 @@ internal class Program
             var showVersionShort = invocationContext.ParseResult.GetValueForOption(versionShortOption);
             var showVersionLong = invocationContext.ParseResult.GetValueForOption(versionLongOption);
             var preview = invocationContext.ParseResult.GetValueForOption(previewOption);
-            
+
             // Read the model name from our hidden option and the prompt from the argument
             var modelName = invocationContext.ParseResult.GetValueForOption(modelOption);
             var promptParts = invocationContext.ParseResult.GetValueForArgument(inputArgument);
-            var customInstruction = promptParts != null && promptParts.Any() 
+            var customInstruction = promptParts != null && promptParts.Any()
                 ? string.Join(" ", promptParts) : null;
+
+            // Enable debug mode first if requested
+            ConsoleLogger.SetDebugMode(debug);
+
+            // Debug what we received
+            if (debug)
+            {
+                var logger = serviceProvider.GetRequiredService<IConsoleLogger>();
+                logger.Debug($"Command line parsing results:");
+                logger.Debug($"  Model from option: '{modelName ?? "(null)"}'");
+                logger.Debug($"  Custom instruction: '{customInstruction ?? "(null)"}'");
+                logger.Debug($"  Preview mode: {preview}");
+            }
 
             if (showVersionShort || showVersionLong)
             {
@@ -215,8 +258,6 @@ internal class Program
                 Console.WriteLine($"GitGen v{version}");
                 return;
             }
-
-            ConsoleLogger.SetDebugMode(debug);
 
             // Use the orchestrator to handle the main workflow
             var orchestrator = serviceProvider.GetRequiredService<IGenerationOrchestrator>();
@@ -286,7 +327,7 @@ internal class Program
             await menuService.RunAsync();
             invocationContext.ExitCode = 0;
         });
-        
+
         rootCommand.AddCommand(configCommand);
         rootCommand.AddCommand(helpCommand);
         rootCommand.AddCommand(usageCommand);

@@ -41,7 +41,7 @@ public class CommitMessageGenerator
         try
         {
             var provider = _providerFactory.CreateProvider(modelConfig);
-            
+
             // Display model information
             _logger.Information("🔗 Using {ModelName} ({ModelId} via {Provider})",
                 modelConfig.Name, modelConfig.ModelId, modelConfig.Provider);

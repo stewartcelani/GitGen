@@ -16,12 +16,12 @@ public class LlmCallResult : CommitMessageResult
     ///     Gets or sets the time taken for the LLM call.
     /// </summary>
     public TimeSpan ElapsedTime { get; set; }
-    
+
     /// <summary>
     ///     Gets or sets the prompt that was sent to the LLM.
     /// </summary>
     public string? Prompt { get; set; }
-    
+
     /// <summary>
     ///     Gets or sets the model configuration used for this call.
     /// </summary>
@@ -58,13 +58,13 @@ public class LlmCallTracker : ILlmCallTracker
 {
     private readonly IConsoleLogger _logger;
     private readonly IUsageTrackingService _usageTracking;
-    
+
     public LlmCallTracker(IConsoleLogger logger, IUsageTrackingService usageTracking)
     {
         _logger = logger;
         _usageTracking = usageTracking;
     }
-    
+
     public async Task<LlmCallResult> TrackCallAsync(
         string operation,
         string prompt,
@@ -76,7 +76,7 @@ public class LlmCallTracker : ILlmCallTracker
         _logger.Debug($"{indent}🤖 {operation}");
         _logger.Debug($"{indent}Model: {model?.Name ?? "Unknown"} ({model?.ModelId ?? "Unknown"})");
         _logger.Debug($"{indent}Prompt length: {prompt.Length} characters");
-        
+
         // Show truncated prompt in debug mode
         if (prompt.Length > 200)
         {
@@ -86,16 +86,16 @@ public class LlmCallTracker : ILlmCallTracker
         {
             _logger.Debug($"{indent}Prompt: {prompt}");
         }
-        
+
         // Start timing
         var stopwatch = Stopwatch.StartNew();
-        
+
         try
         {
             // Make the actual API call
             var result = await apiCall();
             stopwatch.Stop();
-            
+
             // Create extended result
             var llmResult = new LlmCallResult
             {
@@ -107,13 +107,13 @@ public class LlmCallTracker : ILlmCallTracker
                 Prompt = prompt,
                 Model = model
             };
-            
+
             // Display the results
             DisplayCallResult(operation, llmResult, indent);
-            
+
             // Record usage
             await RecordUsageAsync(llmResult);
-            
+
             return llmResult;
         }
         catch (Exception)
@@ -123,39 +123,39 @@ public class LlmCallTracker : ILlmCallTracker
             throw;
         }
     }
-    
+
     private void DisplayCallResult(string operation, LlmCallResult result, string indent = "")
     {
         // Build the status line
         var statusParts = new List<string>();
-        
+
         // Token information
         if (result.InputTokens.HasValue && result.OutputTokens.HasValue)
         {
             statusParts.Add($"{result.InputTokens:N0} → {result.OutputTokens:N0} tokens ({result.TotalTokens:N0} total)");
         }
-        
+
         // Cost information
         if (result.Model?.Pricing != null && result.InputTokens.HasValue && result.OutputTokens.HasValue)
         {
             var cost = CostCalculationService.CalculateAndFormatCost(
-                result.Model, 
-                result.InputTokens.Value, 
+                result.Model,
+                result.InputTokens.Value,
                 result.OutputTokens.Value);
-                
+
             if (!string.IsNullOrEmpty(cost))
             {
                 statusParts.Add($"~{cost}");
             }
         }
-        
+
         // Timing
         statusParts.Add($"{result.ElapsedTime.TotalSeconds:F1}s");
-        
+
         // Display the status line
         var statusLine = string.Join(" • ", statusParts);
         _logger.Muted($"{indent}📊 {statusLine}");
-        
+
         // In debug mode, show response preview
         if (result.Message.Length > 100)
         {
@@ -166,7 +166,7 @@ public class LlmCallTracker : ILlmCallTracker
             _logger.Debug($"{indent}Response: {result.Message}");
         }
     }
-    
+
     private async Task RecordUsageAsync(LlmCallResult result)
     {
         _logger.Debug("LlmCallTracker.RecordUsageAsync started");
@@ -175,7 +175,7 @@ public class LlmCallTracker : ILlmCallTracker
             // Get git repository information
             string? projectPath = null;
             string? gitBranch = null;
-            
+
             try
             {
                 projectPath = Directory.GetCurrentDirectory();
@@ -186,7 +186,7 @@ public class LlmCallTracker : ILlmCallTracker
             {
                 // Ignore git errors - not all projects are git repositories
             }
-            
+
             // Create usage entry
             var entry = new UsageEntry
             {
@@ -210,21 +210,21 @@ public class LlmCallTracker : ILlmCallTracker
                 ProjectPath = projectPath,
                 GitBranch = gitBranch
             };
-            
+
             // Add cost information if available
             if (result.Model?.Pricing != null && result.InputTokens.HasValue && result.OutputTokens.HasValue)
             {
                 var inputCost = (result.InputTokens.Value / 1_000_000m) * result.Model.Pricing.InputPer1M;
                 var outputCost = (result.OutputTokens.Value / 1_000_000m) * result.Model.Pricing.OutputPer1M;
                 var totalCost = inputCost + outputCost;
-                
+
                 entry.Cost = new CostInfo
                 {
                     Amount = totalCost,
                     Currency = result.Model.Pricing.CurrencyCode
                 };
             }
-            
+
             // Record the usage
             _logger.Debug($"Recording usage for model: {entry.Model.Name}, tokens: {entry.Tokens.Total}, cost: {entry.Cost?.Amount ?? 0}");
             await _usageTracking.RecordUsageAsync(entry);

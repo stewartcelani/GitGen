@@ -92,7 +92,7 @@ public class HttpResponseException : Exception
         string? errorContext)
     {
         var message = $"HTTP request failed with status {(int)statusCode} {statusCode}";
-        
+
         if (!string.IsNullOrEmpty(requestUrl))
         {
             message += $" from {requestUrl}";
@@ -111,8 +111,8 @@ public class HttpResponseException : Exception
         if (!string.IsNullOrEmpty(responseBody))
         {
             // Include a truncated version of the response body in the message
-            var truncated = responseBody.Length > 200 
-                ? responseBody.Substring(0, 200) + "..." 
+            var truncated = responseBody.Length > 200
+                ? responseBody.Substring(0, 200) + "..."
                 : responseBody;
             message += $". Response: {truncated}";
         }
