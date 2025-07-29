@@ -1,3 +1,4 @@
+using GitGen;
 using GitGen.Configuration;
 
 namespace GitGen.Services;
@@ -471,7 +472,7 @@ public static class ValidationService
                 return null;
 
             var lowerUrl = url.ToLowerInvariant();
-
+            
             // Check each provider pattern (case-insensitive)
             if (lowerUrl.StartsWith(Constants.Providers.XAIUrlPattern.ToLowerInvariant()))
                 return Constants.Providers.XAI;

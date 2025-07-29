@@ -250,37 +250,10 @@ public class OpenAIProvider : ICommitMessageProvider
             var parameters = await _parameterDetector.DetectParametersAsync(_modelConfig.ModelId);
             return (true, parameters.UseLegacyMaxTokens, parameters.Temperature);
         }
-        catch (HttpResponseException)
+        catch (Exception)
         {
-            // The HttpResponseException already has formatted error information
-            // No need to log here as HttpClientService already logged with proper formatting
-            return (false, false, Constants.Configuration.DefaultTemperature);
-        }
-        catch (HttpRequestException httpEx)
-        {
-            // Handle legacy HttpRequestException (in case parameter detector hasn't been updated yet)
-            if (httpEx.InnerException is HttpResponseException responseEx)
-            {
-                // Already logged by HttpClientService
-                return (false, false, Constants.Configuration.DefaultTemperature);
-            }
-            
-            // Fallback for other HTTP errors
-            var errorMessage = httpEx.Message;
-            if (httpEx.StatusCode != null)
-            {
-                _logger.Error($"API request failed with status code {httpEx.StatusCode}: {errorMessage}");
-            }
-            else
-            {
-                _logger.Error($"API request failed: {errorMessage}");
-            }
-            
-            return (false, false, Constants.Configuration.DefaultTemperature);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Configuration test failed");
+            // The error has already been logged with full details in OpenAIParameterDetector
+            // Just return failure - don't log again to avoid duplicate error messages
             return (false, false, Constants.Configuration.DefaultTemperature);
         }
     }

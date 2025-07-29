@@ -1,5 +1,6 @@
 using GitGen.Configuration;
 using GitGen.Providers;
+using GitGen.Exceptions;
 using System.Globalization;
 
 namespace GitGen.Services;
@@ -14,6 +15,7 @@ public class ConfigurationWizardService
     private readonly IConsoleLogger _logger;
     private readonly ProviderFactory _providerFactory;
     private readonly ISecureConfigurationService? _secureConfigService;
+    private readonly IConsoleInput _consoleInput;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="ConfigurationWizardService" /> class.
@@ -25,11 +27,13 @@ public class ConfigurationWizardService
         IConsoleLogger logger,
         ProviderFactory providerFactory,
         ConfigurationService configurationService,
+        IConsoleInput consoleInput,
         ISecureConfigurationService? secureConfigService = null)
     {
         _logger = logger;
         _providerFactory = providerFactory;
         _configurationService = configurationService;
+        _consoleInput = consoleInput;
         _secureConfigService = secureConfigService;
     }
 
@@ -101,7 +105,7 @@ public class ConfigurationWizardService
             Console.Write(" ");
             Console.Out.Flush();
 
-            var input = secret ? ReadPassword() : Console.ReadLine();
+            var input = secret ? _consoleInput.ReadPassword() : _consoleInput.ReadLine();
             if (secret) Console.WriteLine();
 
             if (!string.IsNullOrWhiteSpace(input)) return input;
@@ -109,29 +113,6 @@ public class ConfigurationWizardService
 
             _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.ErrorMessages.ValueCannotBeEmpty}");
         }
-    }
-
-    private static string ReadPassword()
-    {
-        var pass = string.Empty;
-        ConsoleKey key;
-        do
-        {
-            var keyInfo = Console.ReadKey(true);
-            key = keyInfo.Key;
-            if (key == ConsoleKey.Backspace && pass.Length > 0)
-            {
-                Console.Write("\b \b");
-                pass = pass[..^1];
-            }
-            else if (!char.IsControl(keyInfo.KeyChar))
-            {
-                Console.Write("*");
-                pass += keyInfo.KeyChar;
-            }
-        } while (key != ConsoleKey.Enter);
-
-        return pass;
     }
 
 
@@ -566,7 +547,7 @@ public class ConfigurationWizardService
                 if (!string.IsNullOrEmpty(openAIProvider))
                 {
                     model.Provider = openAIProvider;
-                    _logger.Information($"Provider name [{openAIProvider}]: {openAIProvider}");
+                    _logger.Success($"✅ Detected provider: {openAIProvider}");
                 }
                 else
                 {
@@ -583,10 +564,11 @@ public class ConfigurationWizardService
                 
                 // Check if URL matches a known provider
                 var knownProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
+                
                 if (!string.IsNullOrEmpty(knownProvider))
                 {
                     model.Provider = knownProvider;
-                    _logger.Information($"Provider name [{knownProvider}]: {knownProvider}");
+                    _logger.Success($"✅ Detected provider: {knownProvider}");
                 }
                 else
                 {
@@ -607,7 +589,7 @@ public class ConfigurationWizardService
                 if (!string.IsNullOrEmpty(knownLocalProvider))
                 {
                     model.Provider = knownLocalProvider;
-                    _logger.Information($"Provider name [{knownLocalProvider}]: {knownLocalProvider}");
+                    _logger.Success($"✅ Detected provider: {knownLocalProvider}");
                 }
                 else
                 {
@@ -666,49 +648,104 @@ public class ConfigurationWizardService
         _logger.Highlight("Step 7: Test the configuration.", ConsoleColor.Yellow);
         _logger.Information("Testing your configuration and detecting optimal API parameters...");
         
-        try
+        const int maxAttempts = 3;
+        int attempt = 0;
+        
+        while (attempt < maxAttempts)
         {
-            var provider = _providerFactory.CreateProvider(model);
-            var (success, useLegacyTokens, detectedTemperature) = await provider.TestConnectionAndDetectParametersAsync();
-
-            if (!success)
+            attempt++;
+            
+            try
             {
-                _logger.Error("❌ Configuration test failed. Please check the error details above.");
+                var provider = _providerFactory.CreateProvider(model);
+                var (success, useLegacyTokens, detectedTemperature) = await provider.TestConnectionAndDetectParametersAsync();
+
+                if (!success)
+                {
+                    // Error details have already been shown by parameter detector
+                    
+                    if (attempt < maxAttempts)
+                    {
+                        var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
+                        if (retry.ToLower() == "y")
+                        {
+                            _logger.Information("Retrying configuration test...");
+                            continue;
+                        }
+                    }
+                    
+                    return false;
+                }
+
+                // Store the detected parameters
+                model.UseLegacyMaxTokens = useLegacyTokens;
+                model.Temperature = detectedTemperature;
+
+                // Perform a full test
+                _logger.Information("");
+                _logger.Information($"{Constants.UI.TestTubeSymbol} Testing LLM connection...");
+                _logger.Information($"{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {model.Url} ({model.ModelId})");
+
+                var testResult = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
+                var cleanedMessage = MessageCleaningService.CleanForDisplay(testResult.Message);
+
+                _logger.Information("");
+                _logger.Success($"{Constants.UI.CheckMark} LLM Response:");
+                _logger.Highlight($"{Constants.UI.CommitMessageQuotes}{cleanedMessage}{Constants.UI.CommitMessageQuotes}", ConsoleColor.DarkCyan);
+                _logger.Information("");
+
+                if (testResult.InputTokens.HasValue && testResult.OutputTokens.HasValue)
+                    _logger.Muted($"Generated with {testResult.InputTokens:N0} input tokens, {testResult.OutputTokens:N0} output tokens ({testResult.TotalTokens:N0} total) • {cleanedMessage.Length} characters");
+                else
+                    _logger.Muted($"Generated with {cleanedMessage.Length} characters");
+
+                _logger.Information("");
+                _logger.Success($"{Constants.UI.PartySymbol} Configuration test successful!");
+                return true;
+            }
+            catch (HttpResponseException httpEx) when (httpEx.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                _logger.Warning("⚠️  Rate limited by the API provider. This is common with free models.");
+                
+                if (attempt < maxAttempts)
+                {
+                    _logger.Information("The API's built-in retry mechanism will handle rate limiting automatically.");
+                    var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
+                    if (retry.ToLower() == "y")
+                    {
+                        _logger.Information("Waiting a moment before retrying...");
+                        await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                        continue;
+                    }
+                }
+                
+                // Rate limiting error already shown
                 return false;
             }
-
-            // Store the detected parameters
-            model.UseLegacyMaxTokens = useLegacyTokens;
-            model.Temperature = detectedTemperature;
-
-            // Perform a full test
-            _logger.Information("");
-            _logger.Information($"{Constants.UI.TestTubeSymbol} Testing LLM connection...");
-            _logger.Information($"{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {model.Url} ({model.ModelId})");
-
-            var testResult = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
-            var cleanedMessage = MessageCleaningService.CleanForDisplay(testResult.Message);
-
-            _logger.Information("");
-            _logger.Success($"{Constants.UI.CheckMark} LLM Response:");
-            _logger.Highlight($"{Constants.UI.CommitMessageQuotes}{cleanedMessage}{Constants.UI.CommitMessageQuotes}", ConsoleColor.DarkCyan);
-            _logger.Information("");
-
-            if (testResult.InputTokens.HasValue && testResult.OutputTokens.HasValue)
-                _logger.Muted($"Generated with {testResult.InputTokens:N0} input tokens, {testResult.OutputTokens:N0} output tokens ({testResult.TotalTokens:N0} total) • {cleanedMessage.Length} characters");
-            else
-                _logger.Muted($"Generated with {cleanedMessage.Length} characters");
-
-            _logger.Information("");
-            _logger.Success($"{Constants.UI.PartySymbol} Configuration test successful!");
-            return true;
+            catch (Exception ex)
+            {
+                // For unexpected errors not handled by parameter detector, show the error
+                if (!(ex.InnerException is HttpRequestException))
+                {
+                    _logger.Error($"❌ Unexpected error: {ex.Message}");
+                }
+                // Otherwise, error was already shown by parameter detector
+                
+                if (attempt < maxAttempts)
+                {
+                    var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
+                    if (retry.ToLower() == "y")
+                    {
+                        continue;
+                    }
+                }
+                
+                return false;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.Error("❌ Configuration test failed: {Message}", ex.Message);
-            _logger.Error(ex, "Failed to connect to provider during wizard setup.");
-            return false;
-        }
+        
+        // All retries exhausted
+        return false;
     }
 
     private async Task ConfigurePricing(ModelConfiguration model)
@@ -777,7 +814,7 @@ public class ConfigurationWizardService
         _logger.Information("");
         _logger.Highlight("Step 9: Configure custom system prompt (optional).", ConsoleColor.Cyan);
         _logger.Information("This will be appended to GitGen's base instructions for this model.");
-        _logger.Muted("Example: 'Always use conventional commit format' or 'Focus on architectural changes'");
+        _logger.Muted("Example: 'Always use conventional commit format' or 'Must start with a Haiku' or 'Focus on architectural changes'");
 
         var systemPrompt = Prompt("Enter custom system prompt:", "");
         if (!string.IsNullOrWhiteSpace(systemPrompt))

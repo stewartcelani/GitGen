@@ -68,6 +68,19 @@ public class HttpRequestOptions
         ThrowOnError = true,
         DetailLevel = ErrorDetailLevel.Silent
     };
+
+    /// <summary>
+    ///     Creates options for configuration testing (show errors, throw exceptions).
+    ///     Used during model configuration to ensure developers see error details.
+    /// </summary>
+    public static HttpRequestOptions ForConfigurationTesting => new()
+    {
+        SuppressErrorLogging = false,
+        ThrowOnError = true,
+        DetailLevel = ErrorDetailLevel.Verbose,
+        IncludeResponseBodyInException = true,
+        ErrorContext = "during configuration testing"
+    };
 }
 
 /// <summary>

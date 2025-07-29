@@ -132,6 +132,7 @@ internal class Program
                     factory.CreateLogger<ConfigurationWizardService>(),
                     provider.GetRequiredService<ProviderFactory>(),
                     provider.GetRequiredService<ConfigurationService>(),
+                    provider.GetRequiredService<IConsoleInput>(),
                     provider.GetRequiredService<ISecureConfigurationService>()))
             .AddSingleton<ConfigurationMenuService>(provider =>
                 new ConfigurationMenuService(

@@ -1,4 +1,5 @@
 using GitGen.Configuration;
+using GitGen.Exceptions;
 using GitGen.Helpers;
 using GitGen.Models;
 using GitGen.Providers;
@@ -48,30 +49,31 @@ public class ConfigurationMenuService
             Console.Clear();
             await DisplayMainMenu();
             
-            var choice = Console.ReadLine()?.Trim();
+            var key = Console.ReadKey(true);
             
-            switch (choice)
+            if (key.Key == ConsoleKey.Escape)
             {
-                case "1":
+                return;
+            }
+            
+            switch (key.KeyChar)
+            {
+                case '1':
                     await AddNewModel();
                     break;
-                case "2":
+                case '2':
                     await ManageModels();
                     break;
-                case "3":
+                case '3':
                     await TestModels();
                     break;
-                case "4":
+                case '4':
                     await ConfigureAppSettings();
                     break;
-                case "5":
+                case '5':
                     await ResetConfiguration();
                     break;
-                case "0":
-                case "":
-                case null:
-                    return;
-                case "9": // Hidden debug option
+                case '9': // Hidden debug option
                     await DiagnosticDump();
                     break;
                 default:
@@ -97,10 +99,9 @@ public class ConfigurationMenuService
         _logger.Information("3. Test models");
         _logger.Information("4. App settings");
         _logger.Information("5. Reset all configuration");
-        _logger.Information("0. Exit");
         
         Console.WriteLine();
-        Console.Write("Select option: ");
+        _logger.Muted("Press ESC to exit...");
     }
     
     private async Task AddNewModel()
@@ -127,29 +128,30 @@ public class ConfigurationMenuService
             Console.Clear();
             await DisplayModelManagementMenu();
             
-            var choice = Console.ReadLine()?.Trim();
+            var key = Console.ReadKey(true);
             
-            switch (choice)
+            if (key.Key == ConsoleKey.Escape)
             {
-                case "1":
+                return;
+            }
+            
+            switch (key.KeyChar)
+            {
+                case '1':
                     await ListModels();
                     break;
-                case "2":
+                case '2':
                     await SetDefaultModel();
                     break;
-                case "3":
+                case '3':
                     await EditModel();
                     break;
-                case "4":
+                case '4':
                     await DeleteModel();
                     break;
-                case "5":
+                case '5':
                     await AddNewModel();
                     break;
-                case "0":
-                case "":
-                case null:
-                    return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
                     await Task.Delay(1500);
@@ -170,10 +172,9 @@ public class ConfigurationMenuService
         _logger.Information("3. Edit model (aliases, tokens, etc.)");
         _logger.Information("4. Delete model");
         _logger.Information("5. Add new model");
-        _logger.Information("0. Back to main menu");
         
         Console.WriteLine();
-        Console.Write("Select option: ");
+        _logger.Muted("Press ESC to go back...");
     }
     
     private async Task ListModels()
@@ -200,8 +201,17 @@ public class ConfigurationMenuService
                 _logger.Muted($"    URL: {model.Url}");
                 _logger.Muted($"    Temperature: {model.Temperature} | Max Output Tokens: {model.MaxOutputTokens:N0}");
                 
-                if (!string.IsNullOrWhiteSpace(model.Note))
-                    _logger.Muted($"    Note: {model.Note}");
+                var trimmedNote = model.Note?.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmedNote))
+                    _logger.Muted($"    Note: {trimmedNote}");
+                
+                if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+                {
+                    var truncatedPrompt = model.SystemPrompt.Length > 50 
+                        ? model.SystemPrompt.Substring(0, 50) + "..." 
+                        : model.SystemPrompt;
+                    _logger.Muted($"    System Prompt: {truncatedPrompt}");
+                }
                 
                 if (model.Aliases != null && model.Aliases.Count > 0)
                 {
@@ -240,46 +250,75 @@ public class ConfigurationMenuService
         // Display numbered list of models
         for (int i = 0; i < settings.Models.Count; i++)
         {
-            var model = settings.Models[i];
-            var defaultMarker = model.Id == settings.DefaultModelId ? " (current default)" : "";
-            _logger.Information($"{i + 1}. {model.Name}{defaultMarker}");
+            DisplayModelListItem(i, settings.Models[i], settings.DefaultModelId);
         }
         
         Console.WriteLine();
-        Console.Write("Select model number (0 to cancel): ");
+        _logger.Muted("Press ESC to go back...");
+        Console.WriteLine();
+        Console.Write("Select model number: ");
         
-        if (int.TryParse(Console.ReadLine(), out int selection) && 
-            selection > 0 && selection <= settings.Models.Count)
+        var key = Console.ReadKey(true);
+        
+        if (key.Key == ConsoleKey.Escape)
         {
-            var selectedModel = settings.Models[selection - 1];
-            
-            // Check if this appears to be a public/free model
-            if (AppearsToBePublicModel(selectedModel))
+            return;
+        }
+        
+        if (char.IsDigit(key.KeyChar))
+        {
+            Console.WriteLine(key.KeyChar);
+            int selection = key.KeyChar - '0';
+            if (selection > 0 && selection <= settings.Models.Count)
             {
-                Console.WriteLine();
-                _logger.Warning($"{Constants.UI.WarningSymbol} Warning: This model appears to be configured for public/free use.");
-                _logger.Warning("   Setting it as default means running 'gitgen' without specifying a model");
-                _logger.Warning("   will send your code to this service.");
-                Console.WriteLine();
-                Console.Write("Are you sure you want to set this as the default model? (y/N): ");
-                var confirm = Console.ReadLine()?.Trim().ToLower();
+                var selectedModel = settings.Models[selection - 1];
                 
-                if (confirm != "y" && confirm != "yes")
+                // Show confirmation prompt
+                Console.WriteLine();
+                Console.Write($"Set '{selectedModel.Name}' as default model? (Y/n): ");
+                var confirmKey = Console.ReadKey(true);
+                
+                // Accept Y, y, or Enter as confirmation
+                if (confirmKey.Key == ConsoleKey.Enter || 
+                    confirmKey.KeyChar == 'Y' || 
+                    confirmKey.KeyChar == 'y')
                 {
-                    _logger.Information("Default model change cancelled.");
-                    await Task.Delay(1500);
-                    return;
+                    Console.WriteLine("Yes");
+                    
+                    // Check if this appears to be a public/free model
+                    if (AppearsToBePublicModel(selectedModel))
+                    {
+                        Console.WriteLine();
+                        _logger.Warning($"{Constants.UI.WarningSymbol} Warning: This model appears to be configured for public/free use.");
+                        _logger.Warning("   Setting it as default means running 'gitgen' without specifying a model");
+                        _logger.Warning("   will send your code to this service.");
+                        Console.WriteLine();
+                        Console.Write("Are you sure you want to set this as the default model? (y/N): ");
+                        var confirm = Console.ReadLine()?.Trim().ToLower();
+                        
+                        if (confirm != "y" && confirm != "yes")
+                        {
+                            _logger.Information("Default model change cancelled.");
+                            await Task.Delay(1500);
+                            return;
+                        }
+                    }
+                    
+                    try
+                    {
+                        await _secureConfig.SetDefaultModelAsync(selectedModel.Name);
+                        _logger.Success($"{Constants.UI.CheckMark} Default model changed to '{selectedModel.Name}'");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                    }
                 }
-            }
-            
-            try
-            {
-                await _secureConfig.SetDefaultModelAsync(selectedModel.Name);
-                _logger.Success($"{Constants.UI.CheckMark} Default model changed to '{selectedModel.Name}'");
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                else
+                {
+                    Console.WriteLine("No");
+                    _logger.Information("Default model change cancelled.");
+                }
             }
         }
         
@@ -304,18 +343,30 @@ public class ConfigurationMenuService
         // Display numbered list of models
         for (int i = 0; i < settings.Models.Count; i++)
         {
-            var model = settings.Models[i];
-            _logger.Information($"{i + 1}. {model.Name}");
+            DisplayModelListItem(i, settings.Models[i], settings.DefaultModelId);
         }
         
         Console.WriteLine();
-        Console.Write("Select model number to edit (0 to cancel): ");
+        _logger.Muted("Press ESC to go back...");
+        Console.WriteLine();
+        Console.Write("Select model number to edit: ");
         
-        if (int.TryParse(Console.ReadLine(), out int selection) && 
-            selection > 0 && selection <= settings.Models.Count)
+        var key = Console.ReadKey(true);
+        
+        if (key.Key == ConsoleKey.Escape)
         {
-            var selectedModel = settings.Models[selection - 1];
-            await EditModelMenu(selectedModel);
+            return;
+        }
+        
+        if (char.IsDigit(key.KeyChar))
+        {
+            Console.WriteLine(key.KeyChar);
+            int selection = key.KeyChar - '0';
+            if (selection > 0 && selection <= settings.Models.Count)
+            {
+                var selectedModel = settings.Models[selection - 1];
+                await EditModelMenu(selectedModel);
+            }
         }
     }
     
@@ -337,8 +388,17 @@ public class ConfigurationMenuService
             _logger.Muted($"    URL: {model.Url}");
             _logger.Muted($"    Temperature: {model.Temperature} | Max Output Tokens: {model.MaxOutputTokens:N0}");
             
-            if (!string.IsNullOrWhiteSpace(model.Note))
-                _logger.Muted($"    Note: {model.Note}");
+            var trimmedNote = model.Note?.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmedNote))
+                _logger.Muted($"    Note: {trimmedNote}");
+            
+            if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+            {
+                var truncatedPrompt = model.SystemPrompt.Length > 50 
+                    ? model.SystemPrompt.Substring(0, 50) + "..." 
+                    : model.SystemPrompt;
+                _logger.Muted($"    System Prompt: {truncatedPrompt}");
+            }
             
             if (model.Aliases != null && model.Aliases.Count > 0)
             {
@@ -358,35 +418,39 @@ public class ConfigurationMenuService
             _logger.Information("2. Change max output tokens");
             _logger.Information("3. Update note/description");
             _logger.Information("4. Edit pricing");
-            _logger.Information("5. Test this model");
-            _logger.Information("0. Back to model management");
+            _logger.Information("5. Edit system prompt");
+            _logger.Information("6. Test this model");
             
             Console.WriteLine();
-            Console.Write("Select option: ");
+            _logger.Muted("Press ESC to go back...");
             
-            var choice = Console.ReadLine()?.Trim();
+            var key = Console.ReadKey(true);
             
-            switch (choice)
+            if (key.Key == ConsoleKey.Escape)
             {
-                case "1":
+                return;
+            }
+            
+            switch (key.KeyChar)
+            {
+                case '1':
                     await ManageAliases(model);
                     break;
-                case "2":
+                case '2':
                     await ChangeMaxTokens(model);
                     break;
-                case "3":
+                case '3':
                     await UpdateNote(model);
                     break;
-                case "4":
+                case '4':
                     await EditPricing(model);
                     break;
-                case "5":
+                case '5':
+                    await UpdateSystemPrompt(model);
+                    break;
+                case '6':
                     await TestSingleModelFromMenu(model);
                     break;
-                case "0":
-                case "":
-                case null:
-                    return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
                     await Task.Delay(1500);
@@ -417,16 +481,20 @@ public class ConfigurationMenuService
         Console.WriteLine();
         _logger.Information("1. Add alias");
         _logger.Information("2. Remove alias");
-        _logger.Information("0. Back");
         
         Console.WriteLine();
-        Console.Write("Select option: ");
+        _logger.Muted("Press ESC to go back...");
         
-        var choice = Console.ReadLine()?.Trim();
+        var key = Console.ReadKey(true);
         
-        switch (choice)
+        if (key.Key == ConsoleKey.Escape)
         {
-            case "1":
+            return;
+        }
+        
+        switch (key.KeyChar)
+        {
+            case '1':
                 Console.Write("Enter new alias (without @): ");
                 var newAlias = Console.ReadLine()?.Trim();
                 if (!string.IsNullOrEmpty(newAlias))
@@ -443,7 +511,7 @@ public class ConfigurationMenuService
                 }
                 break;
                 
-            case "2":
+            case '2':
                 if (model.Aliases == null || model.Aliases.Count == 0)
                 {
                     _logger.Warning("No aliases to remove.");
@@ -455,13 +523,37 @@ public class ConfigurationMenuService
                 var aliasToRemove = Console.ReadLine()?.Trim();
                 if (!string.IsNullOrEmpty(aliasToRemove))
                 {
-                    try
+                    // Check if the alias exists
+                    if (!model.Aliases.Contains(aliasToRemove))
                     {
-                        await _secureConfig.RemoveAliasAsync(model.Name, aliasToRemove);
+                        _logger.Warning($"Alias '@{aliasToRemove}' not found.");
+                        await Task.Delay(1500);
+                        break;
                     }
-                    catch (Exception ex)
+                    
+                    // Confirmation prompt
+                    Console.Write($"Remove alias '@{aliasToRemove}' from '{model.Name}'? (Y/n): ");
+                    var confirmKey = Console.ReadKey(true);
+                    
+                    if (confirmKey.Key == ConsoleKey.Enter || 
+                        confirmKey.KeyChar == 'Y' || 
+                        confirmKey.KeyChar == 'y')
                     {
-                        _logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                        Console.WriteLine("Yes");
+                        try
+                        {
+                            await _secureConfig.RemoveAliasAsync(model.Name, aliasToRemove);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                            await Task.Delay(1500);
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("No");
+                        _logger.Information("Alias removal cancelled.");
                         await Task.Delay(1500);
                     }
                 }
@@ -493,28 +585,169 @@ public class ConfigurationMenuService
     
     private async Task UpdateNote(ModelConfiguration model)
     {
-        Console.Clear();
-        _logger.Information($"═══ Update Note: {model.Name} ═══");
-        Console.WriteLine();
-        
-        if (!string.IsNullOrWhiteSpace(model.Note))
+        while (true)
         {
-            _logger.Information($"Current note: {model.Note}");
+            Console.Clear();
+            _logger.Information($"═══ Update Note: {model.Name} ═══");
+            Console.WriteLine();
+            
+            var noteTrimmed = model.Note?.Trim();
+            if (!string.IsNullOrWhiteSpace(noteTrimmed))
+            {
+                _logger.Information("Current note:");
+                _logger.Information($"  {noteTrimmed}");
+            }
+            else
+            {
+                _logger.Information("No note configured.");
+            }
+            
+            Console.WriteLine();
+            _logger.Information("1. Update note");
+            if (!string.IsNullOrWhiteSpace(model.Note))
+            {
+                _logger.Information("2. Clear note");
+            }
+            
+            Console.WriteLine();
+            _logger.Muted("Press ESC to go back...");
+            
+            var key = Console.ReadKey(true);
+            
+            if (key.Key == ConsoleKey.Escape)
+            {
+                return;
+            }
+            
+            switch (key.KeyChar)
+            {
+                case '1':
+                    Console.Write("Enter new note: ");
+                    var newNote = Console.ReadLine()?.Trim();
+                    if (!string.IsNullOrEmpty(newNote))
+                    {
+                        model.Note = newNote;
+                        await _secureConfig.UpdateModelAsync(model);
+                        _logger.Success($"{Constants.UI.CheckMark} Note updated");
+                        await Task.Delay(1500);
+                    }
+                    break;
+                    
+                case '2':
+                    if (!string.IsNullOrWhiteSpace(model.Note))
+                    {
+                        Console.Write("Clear the existing note? (Y/n): ");
+                        var confirmKey = Console.ReadKey(true);
+                        
+                        if (confirmKey.Key == ConsoleKey.Enter || 
+                            confirmKey.KeyChar == 'Y' || 
+                            confirmKey.KeyChar == 'y')
+                        {
+                            Console.WriteLine("Yes");
+                            model.Note = null;
+                            await _secureConfig.UpdateModelAsync(model);
+                            _logger.Success($"{Constants.UI.CheckMark} Note cleared");
+                        }
+                        else
+                        {
+                            Console.WriteLine("No");
+                            _logger.Information("Note clearing cancelled.");
+                        }
+                        await Task.Delay(1500);
+                    }
+                    break;
+                    
+                default:
+                    _logger.Warning("Invalid choice. Please try again.");
+                    await Task.Delay(1500);
+                    break;
+            }
         }
-        else
+    }
+    
+    private async Task UpdateSystemPrompt(ModelConfiguration model)
+    {
+        while (true)
         {
-            _logger.Information("No note configured.");
+            Console.Clear();
+            _logger.Information($"═══ Update System Prompt: {model.Name} ═══");
+            Console.WriteLine();
+            
+            if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+            {
+                _logger.Information("Current system prompt:");
+                _logger.Information($"  {model.SystemPrompt}");
+            }
+            else
+            {
+                _logger.Information("No custom system prompt configured (using default).");
+            }
+            
+            Console.WriteLine();
+            _logger.Muted("This will be appended to GitGen's base instructions for this model.");
+            _logger.Muted("Example: 'Always use conventional commit format' or 'Must start with a Haiku'");
+            Console.WriteLine();
+            
+            _logger.Information("1. Update system prompt");
+            if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+            {
+                _logger.Information("2. Clear system prompt (use default)");
+            }
+            
+            Console.WriteLine();
+            _logger.Muted("Press ESC to go back...");
+            
+            var key = Console.ReadKey(true);
+            
+            if (key.Key == ConsoleKey.Escape)
+            {
+                return;
+            }
+            
+            switch (key.KeyChar)
+            {
+                case '1':
+                    Console.Write("Enter new system prompt: ");
+                    var newPrompt = Console.ReadLine()?.Trim();
+                    if (!string.IsNullOrEmpty(newPrompt))
+                    {
+                        model.SystemPrompt = newPrompt;
+                        await _secureConfig.UpdateModelAsync(model);
+                        _logger.Success($"{Constants.UI.CheckMark} System prompt updated");
+                        await Task.Delay(1500);
+                    }
+                    break;
+                    
+                case '2':
+                    if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+                    {
+                        Console.Write("Clear the existing system prompt? (Y/n): ");
+                        var confirmKey = Console.ReadKey(true);
+                        
+                        if (confirmKey.Key == ConsoleKey.Enter || 
+                            confirmKey.KeyChar == 'Y' || 
+                            confirmKey.KeyChar == 'y')
+                        {
+                            Console.WriteLine("Yes");
+                            model.SystemPrompt = null;
+                            await _secureConfig.UpdateModelAsync(model);
+                            _logger.Success($"{Constants.UI.CheckMark} System prompt cleared (will use default)");
+                        }
+                        else
+                        {
+                            Console.WriteLine("No");
+                            _logger.Information("System prompt clearing cancelled.");
+                        }
+                        await Task.Delay(1500);
+                    }
+                    break;
+                    
+                default:
+                    _logger.Warning("Invalid choice. Please try again.");
+                    await Task.Delay(1500);
+                    break;
+            }
         }
-        
-        Console.WriteLine();
-        Console.Write("Enter new note (or press Enter to clear): ");
-        var newNote = Console.ReadLine()?.Trim();
-        
-        model.Note = string.IsNullOrEmpty(newNote) ? null : newNote;
-        await _secureConfig.UpdateModelAsync(model);
-        
-        _logger.Success($"{Constants.UI.CheckMark} Note updated");
-        await Task.Delay(1500);
     }
     
     private async Task EditPricing(ModelConfiguration model)
@@ -533,31 +766,31 @@ public class ConfigurationMenuService
         _logger.Information("2. Update input cost per million tokens");
         _logger.Information("3. Update output cost per million tokens");
         _logger.Information("4. Update all pricing values");
-        _logger.Information("0. Back");
         
         Console.WriteLine();
-        Console.Write("Select option: ");
+        _logger.Muted("Press ESC to go back...");
         
-        var choice = Console.ReadLine()?.Trim();
+        var key = Console.ReadKey(true);
         
-        switch (choice)
+        if (key.Key == ConsoleKey.Escape)
         {
-            case "1":
+            return;
+        }
+        
+        switch (key.KeyChar)
+        {
+            case '1':
                 await ChangeCurrency(model);
                 break;
-            case "2":
+            case '2':
                 await ChangeInputCost(model);
                 break;
-            case "3":
+            case '3':
                 await ChangeOutputCost(model);
                 break;
-            case "4":
+            case '4':
                 await ChangeAllPricing(model);
                 break;
-            case "0":
-            case "":
-            case null:
-                return;
             default:
                 _logger.Warning("Invalid choice. Please try again.");
                 await Task.Delay(1500);
@@ -701,37 +934,51 @@ public class ConfigurationMenuService
         // Display numbered list of models
         for (int i = 0; i < settings.Models.Count; i++)
         {
-            var model = settings.Models[i];
-            var defaultMarker = model.Id == settings.DefaultModelId ? " (default)" : "";
-            _logger.Information($"{i + 1}. {model.Name}{defaultMarker}");
+            DisplayModelListItem(i, settings.Models[i], settings.DefaultModelId);
         }
         
         Console.WriteLine();
-        Console.Write("Select model number to delete (0 to cancel): ");
+        _logger.Muted("Press ESC to go back...");
+        Console.WriteLine();
+        Console.Write("Select model number to delete: ");
         
-        if (int.TryParse(Console.ReadLine(), out int selection) && 
-            selection > 0 && selection <= settings.Models.Count)
+        var key = Console.ReadKey(true);
+        
+        if (key.Key == ConsoleKey.Escape)
         {
-            var selectedModel = settings.Models[selection - 1];
-            
-            Console.Write($"Are you sure you want to delete '{selectedModel.Name}'? (y/N): ");
-            var confirm = Console.ReadLine()?.Trim().ToLower();
-            
-            if (confirm == "y" || confirm == "yes")
+            return;
+        }
+        
+        if (char.IsDigit(key.KeyChar))
+        {
+            Console.WriteLine(key.KeyChar);
+            int selection = key.KeyChar - '0';
+            if (selection > 0 && selection <= settings.Models.Count)
             {
-                try
+                var selectedModel = settings.Models[selection - 1];
+                
+                Console.Write($"Are you sure you want to delete '{selectedModel.Name}'? (y/N): ");
+                var confirmKey = Console.ReadKey(true);
+                
+                // Only accept 'y' or 'Y' for deletion (more cautious for destructive action)
+                if (confirmKey.KeyChar == 'y' || confirmKey.KeyChar == 'Y')
                 {
-                    await _secureConfig.DeleteModelAsync(selectedModel.Name);
-                    _logger.Success($"{Constants.UI.CheckMark} Model '{selectedModel.Name}' deleted successfully");
+                    Console.WriteLine("Yes");
+                    try
+                    {
+                        await _secureConfig.DeleteModelAsync(selectedModel.Name);
+                        _logger.Success($"{Constants.UI.CheckMark} Model '{selectedModel.Name}' deleted successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.Error($"{Constants.UI.CrossMark} {ex.Message}");
+                    Console.WriteLine("No");
+                    _logger.Information("Deletion cancelled.");
                 }
-            }
-            else
-            {
-                _logger.Information("Deletion cancelled.");
             }
         }
         
@@ -755,25 +1002,25 @@ public class ConfigurationMenuService
         
         _logger.Information("1. Test all models");
         _logger.Information("2. Test specific model");
-        _logger.Information("0. Back");
         
         Console.WriteLine();
-        Console.Write("Select option: ");
+        _logger.Muted("Press ESC to go back...");
         
-        var choice = Console.ReadLine()?.Trim();
+        var key = Console.ReadKey(true);
         
-        switch (choice)
+        if (key.Key == ConsoleKey.Escape)
         {
-            case "1":
+            return;
+        }
+        
+        switch (key.KeyChar)
+        {
+            case '1':
                 await TestAllModels(settings);
                 break;
-            case "2":
+            case '2':
                 await TestSpecificModel(settings);
                 break;
-            case "0":
-            case "":
-            case null:
-                return;
             default:
                 _logger.Warning("Invalid choice. Please try again.");
                 await Task.Delay(1500);
@@ -787,19 +1034,44 @@ public class ConfigurationMenuService
         _logger.Information("═══ Test All Models ═══");
         Console.WriteLine();
         
+        // If 3 or more models, ask for confirmation
+        if (settings.Models.Count >= 3)
+        {
+            Console.Write($"Test all {settings.Models.Count} models? This may take some time. (Y/n): ");
+            var confirmKey = Console.ReadKey(true);
+            
+            if (confirmKey.Key != ConsoleKey.Enter && 
+                confirmKey.KeyChar != 'Y' && 
+                confirmKey.KeyChar != 'y')
+            {
+                Console.WriteLine("No");
+                _logger.Information("Test cancelled.");
+                await Task.Delay(1500);
+                return;
+            }
+            Console.WriteLine("Yes");
+            Console.WriteLine();
+        }
+        
         _logger.Information($"🔍 Testing {settings.Models.Count} configured model{(settings.Models.Count > 1 ? "s" : "")}...");
         Console.WriteLine();
         
         var allSuccess = true;
         var successCount = 0;
+        var failedModels = new List<string>();
         
         foreach (var model in settings.Models.OrderBy(m => m.Name))
         {
             var success = await TestSingleModel(model, indent: "  ");
             if (success)
+            {
                 successCount++;
+            }
             else
+            {
                 allSuccess = false;
+                failedModels.Add(model.Name);
+            }
                 
             Console.WriteLine();
         }
@@ -814,6 +1086,19 @@ public class ConfigurationMenuService
         else
         {
             _logger.Warning($"⚠️  {successCount} of {settings.Models.Count} models passed health check");
+            
+            if (failedModels.Any())
+            {
+                _logger.Error("Failed models:");
+                foreach (var failedModel in failedModels)
+                {
+                    _logger.Error($"  • {failedModel}");
+                }
+            }
+            
+            _logger.Information("");
+            _logger.Information("💡 Tip: Failed models may be rate limited or have configuration issues.");
+            _logger.Information("   The test automatically retries up to 3 times for transient errors.");
         }
         
         Console.WriteLine();
@@ -828,29 +1113,30 @@ public class ConfigurationMenuService
             Console.Clear();
             await DisplayAppSettingsMenu();
             
-            var choice = Console.ReadLine()?.Trim();
+            var key = Console.ReadKey(true);
             
-            switch (choice)
+            if (key.Key == ConsoleKey.Escape)
             {
-                case "1":
+                return;
+            }
+            
+            switch (key.KeyChar)
+            {
+                case '1':
                     await ToggleShowTokenUsage();
                     break;
-                case "2":
+                case '2':
                     await ToggleCopyToClipboard();
                     break;
-                case "3":
+                case '3':
                     await TogglePartialAliasMatching();
                     break;
-                case "4":
+                case '4':
                     await SetMinimumAliasMatchLength();
                     break;
-                case "5":
+                case '5':
                     await TogglePromptConfirmation();
                     break;
-                case "0":
-                case "":
-                case null:
-                    return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
                     await Task.Delay(1500);
@@ -867,20 +1153,14 @@ public class ConfigurationMenuService
         _logger.Information("═══ App Settings ═══");
         Console.WriteLine();
         
-        var tokenUsageStatus = appSettings.ShowTokenUsage ? "ON" : "OFF";
-        var clipboardStatus = appSettings.CopyToClipboard ? "ON" : "OFF";
-        var partialMatchStatus = appSettings.EnablePartialAliasMatching ? "ON" : "OFF";
-        var confirmationStatus = appSettings.RequirePromptConfirmation ? "ON" : "OFF";
-        
-        _logger.Information($"1. Show token usage: {tokenUsageStatus}");
-        _logger.Information($"2. Copy to clipboard: {clipboardStatus}");
-        _logger.Information($"3. Enable partial alias matching: {partialMatchStatus}");
-        _logger.Information($"4. Minimum alias match length: {appSettings.MinimumAliasMatchLength} chars");
-        _logger.Information($"5. Require prompt confirmation: {confirmationStatus}");
-        _logger.Information("0. Back to main menu");
+        DisplaySettingWithStatus("1", "Show token usage", appSettings.ShowTokenUsage);
+        DisplaySettingWithStatus("2", "Copy to clipboard", appSettings.CopyToClipboard);
+        DisplaySettingWithStatus("3", "Enable partial alias matching", appSettings.EnablePartialAliasMatching);
+        DisplaySettingWithValue("4", "Minimum alias match length", $"{appSettings.MinimumAliasMatchLength} chars");
+        DisplaySettingWithStatus("5", "Require prompt confirmation", appSettings.RequirePromptConfirmation);
         
         Console.WriteLine();
-        Console.Write("Select option: ");
+        _logger.Muted("Press ESC to go back...");
     }
     
     private async Task ToggleShowTokenUsage()
@@ -964,10 +1244,12 @@ public class ConfigurationMenuService
         Console.WriteLine();
         
         Console.Write("Are you sure you want to reset all configuration? (y/N): ");
-        var confirm = Console.ReadLine()?.Trim().ToLower();
+        var confirmKey = Console.ReadKey(true);
         
-        if (confirm == "y" || confirm == "yes")
+        // Only accept 'y' or 'Y' for this destructive action
+        if (confirmKey.KeyChar == 'y' || confirmKey.KeyChar == 'Y')
         {
+            Console.WriteLine("Yes");
             // Clear secure storage
             var settings = await _secureConfig.LoadSettingsAsync();
             settings.Models.Clear();
@@ -978,6 +1260,7 @@ public class ConfigurationMenuService
         }
         else
         {
+            Console.WriteLine("No");
             _logger.Information("Reset cancelled.");
         }
         
@@ -993,36 +1276,47 @@ public class ConfigurationMenuService
         // Display numbered list of models
         for (int i = 0; i < settings.Models.Count; i++)
         {
-            var model = settings.Models[i];
-            var defaultMarker = model.Id == settings.DefaultModelId ? " (default)" : "";
-            _logger.Information($"{i + 1}. {model.Name}{defaultMarker}");
+            DisplayModelListItem(i, settings.Models[i], settings.DefaultModelId);
         }
         
         Console.WriteLine();
-        Console.Write("Select model number to test (0 to cancel): ");
+        _logger.Muted("Press ESC to go back...");
+        Console.WriteLine();
+        Console.Write("Select model number to test: ");
         
-        if (int.TryParse(Console.ReadLine(), out int selection) && 
-            selection > 0 && selection <= settings.Models.Count)
+        var key = Console.ReadKey(true);
+        
+        if (key.Key == ConsoleKey.Escape)
         {
-            var selectedModel = settings.Models[selection - 1];
-            Console.WriteLine();
-            
-            var success = await TestSingleModel(selectedModel);
-            
-            Console.WriteLine();
-            if (success)
-            {
-                _logger.Success($"{Constants.UI.CheckMark} Model test passed!");
-            }
-            else
-            {
-                _logger.Error($"{Constants.UI.CrossMark} Model test failed!");
-            }
+            return;
         }
         
-        Console.WriteLine();
-        _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        if (char.IsDigit(key.KeyChar))
+        {
+            Console.WriteLine(key.KeyChar);
+            int selection = key.KeyChar - '0';
+            if (selection > 0 && selection <= settings.Models.Count)
+            {
+                var selectedModel = settings.Models[selection - 1];
+                Console.WriteLine();
+                
+                var success = await TestSingleModel(selectedModel);
+                
+                Console.WriteLine();
+                if (success)
+                {
+                    _logger.Success($"{Constants.UI.CheckMark} Model test passed!");
+                }
+                else
+                {
+                    _logger.Error($"{Constants.UI.CrossMark} Model test failed!");
+                }
+                
+                Console.WriteLine();
+                _logger.Information("Press any key to continue...");
+                Console.ReadKey(true);
+            }
+        }
     }
     
     private async Task TestSingleModelFromMenu(ModelConfiguration model)
@@ -1041,6 +1335,10 @@ public class ConfigurationMenuService
         else
         {
             _logger.Error($"{Constants.UI.CrossMark} Model test failed!");
+            _logger.Information("");
+            _logger.Information("💡 The test automatically retried up to 3 times.");
+            _logger.Information("   If this is a free model, rate limiting is common.");
+            _logger.Information("   Consider waiting a moment before trying again.");
         }
         
         Console.WriteLine();
@@ -1056,11 +1354,24 @@ public class ConfigurationMenuService
         _logger.Muted($"{indent}  URL: {model.Url}");
         _logger.Muted($"{indent}  Temperature: {model.Temperature} | Max Output Tokens: {model.MaxOutputTokens:N0}");
         
-        try
+        if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
         {
-            // Test the connection
+            var truncatedPrompt = model.SystemPrompt.Length > 50 
+                ? model.SystemPrompt.Substring(0, 50) + "..." 
+                : model.SystemPrompt;
+            _logger.Muted($"{indent}  System Prompt: {truncatedPrompt}");
+        }
+        
+        const int maxAttempts = 3;
+        int attempt = 0;
+        
+        while (attempt < maxAttempts)
+        {
+            attempt++;
+            
             try
             {
+                // Test the connection
                 var provider = CreateProviderWithIndent(model, indent);
                 _logger.Information($"{indent}  {Constants.UI.TestTubeSymbol} Testing connection...");
                 
@@ -1068,17 +1379,53 @@ public class ConfigurationMenuService
                 _logger.Success($"{indent}  {Constants.UI.CheckMark} LLM Response: \"{result.Message}\"");
                 return true;
             }
+            catch (HttpResponseException httpEx) when (httpEx.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                _logger.Warning($"{indent}  ⚠️  Rate limited. This is common with free models.");
+                
+                if (attempt < maxAttempts)
+                {
+                    _logger.Information($"{indent}  Waiting before retry attempt {attempt + 1}/{maxAttempts}...");
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                    continue;
+                }
+                
+                _logger.Error($"{indent}  {Constants.UI.CrossMark} Test failed: Rate limited after {maxAttempts} attempts");
+                return false;
+            }
             catch (Exception testEx)
             {
                 _logger.Error($"{indent}  {Constants.UI.CrossMark} Test failed: {testEx.Message}");
+                
+                // Only retry for transient errors
+                if (attempt < maxAttempts && IsTransientError(testEx))
+                {
+                    _logger.Information($"{indent}  Retrying ({attempt}/{maxAttempts})...");
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+                    continue;
+                }
+                
                 return false;
             }
         }
-        catch (Exception ex)
+        
+        return false;
+    }
+    
+    private bool IsTransientError(Exception ex)
+    {
+        // Check if it's a transient error that might succeed on retry
+        if (ex is HttpRequestException || ex is TaskCanceledException)
+            return true;
+            
+        if (ex is HttpResponseException httpEx)
         {
-            _logger.Error($"{indent}  {Constants.UI.CrossMark} Error: {ex.Message}");
-            return false;
+            // Retry on server errors and timeouts
+            var statusCode = (int)httpEx.StatusCode;
+            return statusCode >= 500 || statusCode == 408 || statusCode == 429;
         }
+        
+        return false;
     }
     
     private ICommitMessageProvider CreateProviderWithIndent(ModelConfiguration model, string indent)
@@ -1257,5 +1604,61 @@ public class ConfigurationMenuService
         
         Console.WriteLine("\nPress any key to continue...");
         Console.ReadKey(true);
+    }
+    
+    /// <summary>
+    ///     Displays a model in a list with consistent formatting, showing default status and aliases.
+    /// </summary>
+    private void DisplayModelListItem(int index, ModelConfiguration model, string? defaultModelId)
+    {
+        // Write number and model name
+        Console.Write($"{index + 1}. {model.Name}");
+        
+        // Add star and (default) if this is the default model
+        if (model.Id == defaultModelId)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write(" ⭐ (default)");
+            Console.ResetColor();
+        }
+        
+        // Add aliases in grey if any exist
+        if (model.Aliases != null && model.Aliases.Any())
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.Write($" {string.Join(" ", model.Aliases.Select(a => $"@{a}"))}");
+            Console.ResetColor();
+        }
+        
+        Console.WriteLine(); // End the line
+    }
+    
+    /// <summary>
+    ///     Displays a setting item with colored ON/OFF status.
+    /// </summary>
+    private void DisplaySettingWithStatus(string number, string label, bool isOn)
+    {
+        Console.Write($"{number}. {label}: ");
+        
+        if (isOn)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("ON");
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("OFF");
+        }
+        
+        Console.ResetColor();
+    }
+    
+    /// <summary>
+    ///     Displays a setting item with a custom value (not ON/OFF).
+    /// </summary>
+    private void DisplaySettingWithValue(string number, string label, string value)
+    {
+        Console.WriteLine($"{number}. {label}: {value}");
     }
 }

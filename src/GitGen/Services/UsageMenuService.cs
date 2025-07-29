@@ -40,38 +40,39 @@ public class UsageMenuService
             _consoleOutput.Clear();
             await DisplayMainMenu();
             
-            var choice = _consoleInput.ReadLine()?.Trim();
+            var key = _consoleInput.ReadKey(true);
             
-            switch (choice)
+            if (key.Key == ConsoleKey.Escape)
             {
-                case "1":
+                return;
+            }
+            
+            switch (key.KeyChar)
+            {
+                case '1':
                     await ViewTodayUsage();
                     break;
-                case "2":
+                case '2':
                     await ViewYesterdayUsage();
                     break;
-                case "3":
+                case '3':
                     await ViewThisWeekUsage();
                     break;
-                case "4":
+                case '4':
                     await ViewThisMonthUsage();
                     break;
-                case "5":
+                case '5':
                     await ViewLastMonthUsage();
                     break;
-                case "6":
+                case '6':
                     await ViewCustomDateRange();
                     break;
-                case "7":
+                case '7':
                     await ViewDetailedRequests();
                     break;
-                case "8":
+                case '8':
                     await ExportReports();
                     break;
-                case "0":
-                case "":
-                case null:
-                    return;
                 default:
                     _logger.Warning("Invalid choice. Please try again.");
                     await Task.Delay(1500);
@@ -117,10 +118,9 @@ public class UsageMenuService
         _logger.Information("6. Custom date range");
         _logger.Information("7. Detailed request history");
         _logger.Information("8. Export reports");
-        _logger.Information("0. Back to main menu");
         
         _consoleOutput.WriteLine();
-        _consoleOutput.Write("Select option: ");
+        _logger.Muted("Press ESC to go back...");
     }
     
     private async Task<QuickStats> GetQuickStats(DateTime startDate, DateTime endDate)
