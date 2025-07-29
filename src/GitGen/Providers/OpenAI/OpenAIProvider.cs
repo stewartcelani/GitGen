@@ -377,7 +377,8 @@ public class OpenAIProvider : ICommitMessageProvider
             // Check if this is a context length error
             if (ex.ResponseBody != null &&
                 (ex.ResponseBody.Contains(Constants.Api.ContextLengthExceededError) ||
-                 ex.ResponseBody.Contains("maximum context length")))
+                 ex.ResponseBody.Contains("maximum context length") ||
+                 ex.ResponseBody.Contains("maximum prompt length")))
             {
                 throw ContextLengthExceededException.ParseFromApiError(ex.ResponseBody, ex);
             }
@@ -453,7 +454,8 @@ public class OpenAIProvider : ICommitMessageProvider
 
         return ex.Message.Contains(Constants.Api.ContextLengthExceededError) ||
                (ex.Message.Contains(Constants.Api.InvalidRequestError) &&
-                ex.Message.Contains("maximum context length"));
+                ex.Message.Contains("maximum context length")) ||
+               ex.Message.Contains("maximum prompt length");
     }
 
     private bool IsAuthenticationError(HttpRequestException? ex, string errorContent)

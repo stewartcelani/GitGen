@@ -76,6 +76,18 @@ public class ContextLengthExceededException : Exception
             maxContext = max;
         }
 
+        // Also check for xAI format: "maximum prompt length is X"
+        if (!maxContext.HasValue)
+        {
+            var maxPromptMatch = System.Text.RegularExpressions.Regex.Match(
+                apiErrorMessage,
+                @"maximum prompt length is (\d+)");
+            if (maxPromptMatch.Success && int.TryParse(maxPromptMatch.Groups[1].Value, out var maxPrompt))
+            {
+                maxContext = maxPrompt;
+            }
+        }
+
         // Extract requested tokens
         var requestedMatch = System.Text.RegularExpressions.Regex.Match(
             apiErrorMessage,
@@ -83,6 +95,18 @@ public class ContextLengthExceededException : Exception
         if (requestedMatch.Success && int.TryParse(requestedMatch.Groups[1].Value, out var req))
         {
             requested = req;
+        }
+
+        // Also check for xAI format: "request contains X tokens"
+        if (!requested.HasValue)
+        {
+            var containsMatch = System.Text.RegularExpressions.Regex.Match(
+                apiErrorMessage,
+                @"request contains (\d+) tokens");
+            if (containsMatch.Success && int.TryParse(containsMatch.Groups[1].Value, out var contains))
+            {
+                requested = contains;
+            }
         }
 
         // Extract breakdown if available
