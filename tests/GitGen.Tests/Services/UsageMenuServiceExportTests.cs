@@ -14,6 +14,8 @@ public class UsageMenuServiceExportTests : IDisposable
     private readonly Mock<IUsageReportingService> _reportingServiceMock;
     private readonly Mock<ISecureConfigurationService> _secureConfigMock;
     private readonly TestConsoleLogger _logger;
+    private readonly TestConsoleInput _consoleInput;
+    private readonly TestConsoleOutput _consoleOutput;
     private readonly UsageMenuService _service;
     private readonly string _testDirectory;
     
@@ -22,11 +24,15 @@ public class UsageMenuServiceExportTests : IDisposable
         _reportingServiceMock = new Mock<IUsageReportingService>();
         _secureConfigMock = new Mock<ISecureConfigurationService>();
         _logger = new TestConsoleLogger();
+        _consoleInput = new TestConsoleInput();
+        _consoleOutput = new TestConsoleOutput();
         
         _service = new UsageMenuService(
             _logger,
             _reportingServiceMock.Object,
-            _secureConfigMock.Object);
+            _secureConfigMock.Object,
+            _consoleInput,
+            _consoleOutput);
             
         _testDirectory = Path.Combine(Path.GetTempPath(), $"gitgen-export-test-{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
@@ -50,7 +56,7 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportReports_CancelSelection_ReturnsToMenu()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("8\n0\n0");
+        _consoleInput.AddLineInputs("8", "0", "0");
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -77,7 +83,8 @@ public class UsageMenuServiceExportTests : IDisposable
         // Arrange
         var startDate = new DateTime(2025, 7, 1);
         var endDate = new DateTime(2025, 7, 31);
-        using var console = new ConsoleTestHelper($"8\n1\n{startDate:yyyy-MM-dd}\n{endDate:yyyy-MM-dd}\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "1", $"{startDate:yyyy-MM-dd}", $"{endDate:yyyy-MM-dd}", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         
         var entry = new UsageEntryBuilder().Build();
         SetupMockData(new[] { entry });
@@ -110,7 +117,8 @@ public class UsageMenuServiceExportTests : IDisposable
         // Arrange
         var startDate = new DateTime(2025, 7, 1);
         var endDate = new DateTime(2025, 7, 31);
-        using var console = new ConsoleTestHelper($"8\n1\n{startDate:yyyy-MM-dd}\n{endDate:yyyy-MM-dd}\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "1", $"{startDate:yyyy-MM-dd}", $"{endDate:yyyy-MM-dd}", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         
         SetupMockData(new List<UsageEntry>());
         _reportingServiceMock
@@ -134,7 +142,8 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsCsv_CreatesValidCsvFile()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("8\n2\n\n\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "2", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         
         var entries = new[]
         {
@@ -184,7 +193,8 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsCsv_HandlesNullCost()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("8\n2\n\n\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "2", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         
         var entry = new UsageEntryBuilder().Build();
         entry.Cost = null;
@@ -209,7 +219,8 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsMarkdown_CreatesValidMarkdownFile()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("8\n3\n\n\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "3", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         
         var entries = new[]
         {
@@ -256,7 +267,8 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsMarkdown_FormatsTokensCorrectly()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("8\n3\n\n\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "3", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         
         var entry = new UsageEntryBuilder()
             .WithTokens(1500000, 500000)
@@ -284,7 +296,8 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task Export_DefaultDates_UsesLast30DaysToToday()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("8\n1\n\n\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "1", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         
         DateTime capturedStart = default;
         DateTime capturedEnd = default;

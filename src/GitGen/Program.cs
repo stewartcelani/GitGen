@@ -151,11 +151,15 @@ internal class Program
                     provider.GetRequiredService<GitDiffTruncationService>()))
             .AddSingleton<IUsageReportingService>(provider =>
                 new UsageReportingService(factory.CreateLogger<UsageReportingService>()))
+            .AddSingleton<IConsoleInput, SystemConsoleInput>()
+            .AddSingleton<IConsoleOutput, SystemConsoleOutput>()
             .AddSingleton<UsageMenuService>(provider =>
                 new UsageMenuService(
                     factory.CreateLogger<UsageMenuService>(),
                     provider.GetRequiredService<IUsageReportingService>(),
-                    provider.GetRequiredService<ISecureConfigurationService>()))
+                    provider.GetRequiredService<ISecureConfigurationService>(),
+                    provider.GetRequiredService<IConsoleInput>(),
+                    provider.GetRequiredService<IConsoleOutput>()))
             .BuildServiceProvider();
     }
 

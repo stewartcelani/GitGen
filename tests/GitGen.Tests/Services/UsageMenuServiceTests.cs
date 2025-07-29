@@ -13,6 +13,8 @@ public class UsageMenuServiceTests
     private readonly Mock<IUsageReportingService> _reportingServiceMock;
     private readonly Mock<ISecureConfigurationService> _secureConfigMock;
     private readonly TestConsoleLogger _logger;
+    private readonly TestConsoleInput _consoleInput;
+    private readonly TestConsoleOutput _consoleOutput;
     private readonly UsageMenuService _service;
     
     public UsageMenuServiceTests()
@@ -20,11 +22,15 @@ public class UsageMenuServiceTests
         _reportingServiceMock = new Mock<IUsageReportingService>();
         _secureConfigMock = new Mock<ISecureConfigurationService>();
         _logger = new TestConsoleLogger();
+        _consoleInput = new TestConsoleInput();
+        _consoleOutput = new TestConsoleOutput();
         
         _service = new UsageMenuService(
             _logger,
             _reportingServiceMock.Object,
-            _secureConfigMock.Object);
+            _secureConfigMock.Object,
+            _consoleInput,
+            _consoleOutput);
     }
     
     #region Constructor Tests
@@ -36,7 +42,9 @@ public class UsageMenuServiceTests
         var service = new UsageMenuService(
             _logger,
             _reportingServiceMock.Object,
-            _secureConfigMock.Object);
+            _secureConfigMock.Object,
+            new TestConsoleInput(),
+            new TestConsoleOutput());
             
         service.Should().NotBeNull();
     }
@@ -49,7 +57,7 @@ public class UsageMenuServiceTests
     public async Task RunAsync_SelectingExit_ReturnsImmediately()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("0");
+        _consoleInput.AddLineInput("0");
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -58,14 +66,14 @@ public class UsageMenuServiceTests
         // Assert
         _logger.HasMessage("GitGen Usage Statistics").Should().BeTrue();
         _reportingServiceMock.Verify(x => x.GetUsageEntriesAsync(
-            It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Exactly(2)); // For quick stats
+            It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Exactly(4)); // For quick stats (Today, Week, Month, All)
     }
     
     [Fact]
     public async Task RunAsync_EmptyInput_ExitsMenu()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("");
+        _consoleInput.AddLineInput("");
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -79,7 +87,7 @@ public class UsageMenuServiceTests
     public async Task RunAsync_InvalidChoice_ShowsWarning()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("99\n0");
+        _consoleInput.AddLineInputs("99", "0");
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -98,7 +106,8 @@ public class UsageMenuServiceTests
     public async Task RunAsync_SelectingOption_NavigatesToCorrectView(string choice, string expectedTitle)
     {
         // Arrange
-        using var console = new ConsoleTestHelper($"{choice}\n\n0");
+        _consoleInput.AddLineInputs(choice, "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -116,11 +125,22 @@ public class UsageMenuServiceTests
     public async Task DisplayMainMenu_ShowsQuickStats()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("0");
+        _consoleInput.AddLineInput("0");
         var todayEntries = UsageEntryBuilder.CreateMultiple(3, (builder, i) =>
         {
             builder.WithTimestamp(DateTime.Today)
                    .WithCost(0.01m * (i + 1));
+        });
+        
+        // Calculate start of week (Monday)
+        var today = DateTime.Today;
+        int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+        var startOfWeek = today.AddDays(-diff);
+        
+        var weekEntries = UsageEntryBuilder.CreateMultiple(5, (builder, i) =>
+        {
+            builder.WithTimestamp(DateTime.Today.AddDays(-i))
+                   .WithCost(0.02m);
         });
         
         var monthEntries = UsageEntryBuilder.CreateMultiple(10, (builder, i) =>
@@ -129,22 +149,42 @@ public class UsageMenuServiceTests
                    .WithCost(0.05m);
         });
         
+        var allEntries = UsageEntryBuilder.CreateMultiple(20, (builder, i) =>
+        {
+            builder.WithTimestamp(DateTime.Today.AddDays(-i * 10))
+                   .WithCost(0.10m);
+        });
+        
         _reportingServiceMock
             .Setup(x => x.GetUsageEntriesAsync(DateTime.Today, DateTime.Today))
             .ReturnsAsync(todayEntries);
             
         _reportingServiceMock
             .Setup(x => x.GetUsageEntriesAsync(
+                It.Is<DateTime>(d => d == startOfWeek), 
+                DateTime.Today))
+            .ReturnsAsync(weekEntries);
+            
+        _reportingServiceMock
+            .Setup(x => x.GetUsageEntriesAsync(
                 It.Is<DateTime>(d => d.Day == 1), 
                 DateTime.Today))
             .ReturnsAsync(monthEntries);
+            
+        _reportingServiceMock
+            .Setup(x => x.GetUsageEntriesAsync(
+                It.Is<DateTime>(d => d.Year == 2020 && d.Month == 1 && d.Day == 1), 
+                DateTime.Today))
+            .ReturnsAsync(allEntries);
         
         // Act
         await _service.RunAsync();
         
         // Assert
         _logger.HasMessage("Today: 3 calls, $0.06").Should().BeTrue();
+        _logger.HasMessage("Week:  5 calls, $0.10").Should().BeTrue();
         _logger.HasMessage("Month: 10 calls, $0.50").Should().BeTrue();
+        _logger.HasMessage("All:   20 calls, $2.00").Should().BeTrue();
     }
     
     #endregion
@@ -155,7 +195,8 @@ public class UsageMenuServiceTests
     public async Task ViewTodayUsage_WithData_DisplaysSummary()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("1\n\n0");
+        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entries = CreateTestEntries(DateTime.Today, 5);
         
         _reportingServiceMock
@@ -166,17 +207,17 @@ public class UsageMenuServiceTests
         await _service.RunAsync();
         
         // Assert
-        var output = console.GetOutput();
-        output.Should().Contain("Today's Usage");
-        output.Should().Contain("Period: Today");
-        output.Should().Contain("Total calls: 5");
+        _logger.HasMessage("Today's Usage").Should().BeTrue();
+        _logger.HasMessage("Period: Today").Should().BeTrue();
+        _logger.HasMessage("Total calls: 5").Should().BeTrue();
     }
     
     [Fact]
     public async Task ViewTodayUsage_NoData_ShowsNoUsageMessage()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("1\n\n0");
+        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         SetupMockData(new List<UsageEntry>(), DateTime.Today, DateTime.Today);
         
         // Act
@@ -194,7 +235,8 @@ public class UsageMenuServiceTests
     public async Task ViewCustomDateRange_DefaultDates_Uses30DayRange()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("6\n\n\n\n0");
+        _consoleInput.AddLineInputs("6", "", "", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -212,7 +254,8 @@ public class UsageMenuServiceTests
     public async Task ViewCustomDateRange_InvalidStartDate_PromptsAgain()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("6\ninvalid\n2025-01-01\n2025-01-31\n\n0");
+        _consoleInput.AddLineInputs("6", "invalid", "2025-01-01", "2025-01-31", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -226,7 +269,8 @@ public class UsageMenuServiceTests
     public async Task ViewCustomDateRange_EndDateBeforeStart_ShowsWarning()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("6\n2025-01-31\n2025-01-01\n2025-02-01\n\n0");
+        _consoleInput.AddLineInputs("6", "2025-01-31", "2025-01-01", "2025-02-01", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -244,7 +288,7 @@ public class UsageMenuServiceTests
     public async Task ViewDetailedRequests_ShowsSubmenu()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("7\n0\n0");
+        _consoleInput.AddLineInputs("7", "0", "0");
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -262,7 +306,8 @@ public class UsageMenuServiceTests
     public async Task ShowLast10Requests_WithData_DisplaysDetailedTable()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("7\n1\n\n0\n0");
+        _consoleInput.AddLineInputs("7", "1", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entries = CreateTestEntries(DateTime.Today, 15);
         
         _reportingServiceMock
@@ -275,8 +320,8 @@ public class UsageMenuServiceTests
         await _service.RunAsync();
         
         // Assert
-        var output = console.GetOutput();
-        output.Should().Contain("Last 10 Requests");
+        _logger.HasMessage("Last 10 Requests").Should().BeTrue();
+        var output = _consoleOutput.GetOutput();
         output.Should().Contain("│ Time           │ Model                │ Input    │ Output   │ Total    │ Time   │ Cost       │");
     }
     
@@ -284,7 +329,8 @@ public class UsageMenuServiceTests
     public async Task ShowRequestsByModel_NoModels_ShowsMessage()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("7\n3\n\n0\n0");
+        _consoleInput.AddLineInputs("7", "3", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -298,7 +344,8 @@ public class UsageMenuServiceTests
     public async Task ShowRequestsByModel_WithModels_AllowsSelection()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("7\n3\n1\n\n0\n0");
+        _consoleInput.AddLineInputs("7", "3", "1", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entries = new[]
         {
             new UsageEntryBuilder().WithModel("gpt-4").Build(),
@@ -328,7 +375,7 @@ public class UsageMenuServiceTests
     public async Task ExportReports_ShowsFormatOptions()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("8\n0\n0");
+        _consoleInput.AddLineInputs("8", "0", "0");
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -348,7 +395,8 @@ public class UsageMenuServiceTests
         var tempFile = Path.GetTempFileName();
         File.Delete(tempFile); // Delete so the service can create it
         
-        using var console = new ConsoleTestHelper($"8\n1\n\n\n\n0\n0");
+        _consoleInput.AddLineInputs("8", "1", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entry = new UsageEntryBuilder().Build();
         
         _reportingServiceMock

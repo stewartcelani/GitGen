@@ -13,15 +13,21 @@ public class UsageMenuService
     private readonly IConsoleLogger _logger;
     private readonly IUsageReportingService _reportingService;
     private readonly ISecureConfigurationService _secureConfig;
+    private readonly IConsoleInput _consoleInput;
+    private readonly IConsoleOutput _consoleOutput;
     
     public UsageMenuService(
         IConsoleLogger logger,
         IUsageReportingService reportingService,
-        ISecureConfigurationService secureConfig)
+        ISecureConfigurationService secureConfig,
+        IConsoleInput consoleInput,
+        IConsoleOutput consoleOutput)
     {
         _logger = logger;
         _reportingService = reportingService;
         _secureConfig = secureConfig;
+        _consoleInput = consoleInput;
+        _consoleOutput = consoleOutput;
     }
     
     /// <summary>
@@ -31,10 +37,10 @@ public class UsageMenuService
     {
         while (true)
         {
-            Console.Clear();
+            _consoleOutput.Clear();
             await DisplayMainMenu();
             
-            var choice = Console.ReadLine()?.Trim();
+            var choice = _consoleInput.ReadLine()?.Trim();
             
             switch (choice)
             {
@@ -79,17 +85,29 @@ public class UsageMenuService
         _logger.Information("╔════════════════════════════════════════╗");
         _logger.Information("║       GitGen Usage Statistics          ║");
         _logger.Information("╚════════════════════════════════════════╝");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         // Show quick stats
         var todayStats = await GetQuickStats(DateTime.Today, DateTime.Today);
+        
+        // Calculate start of week (Monday)
+        var today = DateTime.Today;
+        int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+        var startOfWeek = today.AddDays(-diff);
+        var weekStats = await GetQuickStats(startOfWeek, today);
+        
         var monthStats = await GetQuickStats(
             new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1),
             DateTime.Today);
         
+        // All time stats - use a reasonable early date (e.g., 2020-01-01)
+        var allStats = await GetQuickStats(new DateTime(2020, 1, 1), DateTime.Today);
+        
         _logger.Information($"Today: {todayStats.TotalCalls} calls, {CostCalculationService.FormatCurrency(todayStats.TotalCost, "USD")}");
+        _logger.Information($"Week:  {weekStats.TotalCalls} calls, {CostCalculationService.FormatCurrency(weekStats.TotalCost, "USD")}");
         _logger.Information($"Month: {monthStats.TotalCalls} calls, {CostCalculationService.FormatCurrency(monthStats.TotalCost, "USD")}");
-        Console.WriteLine();
+        _logger.Information($"All:   {allStats.TotalCalls} calls, {CostCalculationService.FormatCurrency(allStats.TotalCost, "USD")}");
+        _consoleOutput.WriteLine();
         
         _logger.Information("1. Today's usage");
         _logger.Information("2. Yesterday's usage");
@@ -101,8 +119,8 @@ public class UsageMenuService
         _logger.Information("8. Export reports");
         _logger.Information("0. Back to main menu");
         
-        Console.WriteLine();
-        Console.Write("Select option: ");
+        _consoleOutput.WriteLine();
+        _consoleOutput.Write("Select option: ");
     }
     
     private async Task<QuickStats> GetQuickStats(DateTime startDate, DateTime endDate)
@@ -125,38 +143,38 @@ public class UsageMenuService
     
     private async Task ViewTodayUsage()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Today's Usage ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         var entries = await _reportingService.GetUsageEntriesAsync(DateTime.Today, DateTime.Today);
         DisplayUsageSummary(entries, "Today");
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ViewYesterdayUsage()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Yesterday's Usage ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         var yesterday = DateTime.Today.AddDays(-1);
         var entries = await _reportingService.GetUsageEntriesAsync(yesterday, yesterday);
         DisplayUsageSummary(entries, "Yesterday");
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ViewThisWeekUsage()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ This Week's Usage ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         // Calculate start of week (Monday)
         var today = DateTime.Today;
@@ -166,31 +184,31 @@ public class UsageMenuService
         var entries = await _reportingService.GetUsageEntriesAsync(startOfWeek, today);
         DisplayUsageSummary(entries, $"Week of {DateTimeHelper.ToLocalDateString(startOfWeek)}");
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ViewThisMonthUsage()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ This Month's Usage ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         var startOfMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
         var entries = await _reportingService.GetUsageEntriesAsync(startOfMonth, DateTime.Today);
         DisplayMonthlyReport(entries, DateTime.Today.Year, DateTime.Today.Month);
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ViewLastMonthUsage()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Last Month's Usage ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         var lastMonth = DateTime.Today.AddMonths(-1);
         var startOfMonth = new DateTime(lastMonth.Year, lastMonth.Month, 1);
@@ -199,24 +217,24 @@ public class UsageMenuService
         var entries = await _reportingService.GetUsageEntriesAsync(startOfMonth, endOfMonth);
         DisplayMonthlyReport(entries, lastMonth.Year, lastMonth.Month);
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ViewCustomDateRange()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Custom Date Range ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         DateTime startDate, endDate;
         
         // Get start date
         while (true)
         {
-            Console.Write($"Enter start date (YYYY-MM-DD) [{DateTime.Today.AddDays(-30):yyyy-MM-dd}]: ");
-            var input = Console.ReadLine()?.Trim();
+            _consoleOutput.Write($"Enter start date (YYYY-MM-DD) [{DateTime.Today.AddDays(-30):yyyy-MM-dd}]: ");
+            var input = _consoleInput.ReadLine()?.Trim();
             
             if (string.IsNullOrEmpty(input))
             {
@@ -235,8 +253,8 @@ public class UsageMenuService
         // Get end date
         while (true)
         {
-            Console.Write($"Enter end date (YYYY-MM-DD) [{DateTime.Today:yyyy-MM-dd}]: ");
-            var input = Console.ReadLine()?.Trim();
+            _consoleOutput.Write($"Enter end date (YYYY-MM-DD) [{DateTime.Today:yyyy-MM-dd}]: ");
+            var input = _consoleInput.ReadLine()?.Trim();
             
             if (string.IsNullOrEmpty(input))
             {
@@ -258,20 +276,20 @@ public class UsageMenuService
             }
         }
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         var entries = await _reportingService.GetUsageEntriesAsync(startDate, endDate);
         DisplayUsageSummary(entries, $"{DateTimeHelper.ToLocalDateString(startDate)} to {DateTimeHelper.ToLocalDateString(endDate)}");
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ViewDetailedRequests()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Detailed Request History ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         _logger.Information("1. Last 10 requests");
         _logger.Information("2. Today's requests");
@@ -279,10 +297,10 @@ public class UsageMenuService
         _logger.Information("4. Filter by date");
         _logger.Information("0. Back");
         
-        Console.WriteLine();
-        Console.Write("Select option: ");
+        _consoleOutput.WriteLine();
+        _consoleOutput.Write("Select option: ");
         
-        var choice = Console.ReadLine()?.Trim();
+        var choice = _consoleInput.ReadLine()?.Trim();
         
         switch (choice)
         {
@@ -303,9 +321,9 @@ public class UsageMenuService
     
     private async Task ShowLast10Requests()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Last 10 Requests ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         // Get last 30 days of entries and take last 10
         var entries = await _reportingService.GetUsageEntriesAsync(
@@ -323,16 +341,16 @@ public class UsageMenuService
             DisplayDetailedRequests(last10);
         }
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ShowTodayRequests()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Today's Requests ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         var entries = await _reportingService.GetUsageEntriesAsync(DateTime.Today, DateTime.Today);
         var entriesList = entries.OrderByDescending(e => e.Timestamp).ToList();
@@ -346,16 +364,16 @@ public class UsageMenuService
             DisplayDetailedRequests(entriesList);
         }
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ShowRequestsByModel()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Filter by Model ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         // Get available models from recent usage
         var recentEntries = await _reportingService.GetUsageEntriesAsync(
@@ -381,16 +399,16 @@ public class UsageMenuService
             _logger.Information($"{i + 1}. {models[i]}");
         }
         
-        Console.WriteLine();
-        Console.Write("Select model number: ");
+        _consoleOutput.WriteLine();
+        _consoleOutput.Write("Select model number: ");
         
-        if (int.TryParse(Console.ReadLine(), out int selection) && 
+        if (int.TryParse(_consoleInput.ReadLine(), out int selection) && 
             selection > 0 && selection <= models.Count)
         {
             var selectedModel = models[selection - 1];
-            Console.Clear();
+            _consoleOutput.Clear();
             _logger.Information($"═══ Requests for {selectedModel} ═══");
-            Console.WriteLine();
+            _consoleOutput.WriteLine();
             
             var modelEntries = recentEntries
                 .Where(e => e.Model.Name == selectedModel)
@@ -401,28 +419,28 @@ public class UsageMenuService
             DisplayDetailedRequests(modelEntries);
         }
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ShowRequestsByDate()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Filter by Date ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
-        Console.Write($"Enter date (YYYY-MM-DD) [{DateTime.Today:yyyy-MM-dd}]: ");
-        var input = Console.ReadLine()?.Trim();
+        _consoleOutput.Write($"Enter date (YYYY-MM-DD) [{DateTime.Today:yyyy-MM-dd}]: ");
+        var input = _consoleInput.ReadLine()?.Trim();
         
         DateTime date = string.IsNullOrEmpty(input) ? DateTime.Today : DateTime.Parse(input);
         
         var entries = await _reportingService.GetUsageEntriesAsync(date, date);
         var entriesList = entries.OrderByDescending(e => e.Timestamp).ToList();
         
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information($"═══ Requests for {DateTimeHelper.ToLocalDateString(date)} ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         if (!entriesList.Any())
         {
@@ -433,17 +451,17 @@ public class UsageMenuService
             DisplayDetailedRequests(entriesList);
         }
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private void DisplayDetailedRequests(List<UsageEntry> entries)
     {
         // Table headers
-        Console.WriteLine("┌────────────────┬──────────────────────┬──────────┬──────────┬──────────┬────────┬────────────┐");
-        Console.WriteLine("│ Time           │ Model                │ Input    │ Output   │ Total    │ Time   │ Cost       │");
-        Console.WriteLine("├────────────────┼──────────────────────┼──────────┼──────────┼──────────┼────────┼────────────┤");
+        _consoleOutput.WriteLine("┌────────────────┬──────────────────────┬──────────┬──────────┬──────────┬────────┬────────────┐");
+        _consoleOutput.WriteLine("│ Time           │ Model                │ Input    │ Output   │ Total    │ Time   │ Cost       │");
+        _consoleOutput.WriteLine("├────────────────┼──────────────────────┼──────────┼──────────┼──────────┼────────┼────────────┤");
         
         foreach (var entry in entries)
         {
@@ -460,10 +478,10 @@ public class UsageMenuService
                 ? CostCalculationService.FormatCurrency(entry.Cost.Amount, entry.Cost.Currency)
                 : "N/A";
             
-            Console.WriteLine($"│ {timeStr,-14} │ {model,-20} │ {inputTokens,8} │ {outputTokens,8} │ {totalTokens,8} │ {duration,6} │ {cost,10} │");
+            _consoleOutput.WriteLine($"│ {timeStr,-14} │ {model,-20} │ {inputTokens,8} │ {outputTokens,8} │ {totalTokens,8} │ {duration,6} │ {cost,10} │");
         }
         
-        Console.WriteLine("└────────────────┴──────────────────────┴──────────┴──────────┴──────────┴────────┴────────────┘");
+        _consoleOutput.WriteLine("└────────────────┴──────────────────────┴──────────┴──────────┴──────────┴────────┴────────────┘");
     }
     
     private void DisplayUsageSummary(IEnumerable<UsageEntry> entries, string periodName)
@@ -495,12 +513,12 @@ public class UsageMenuService
         _logger.Information($"Total calls: {totalCalls:N0}");
         _logger.Information($"Total cost: {CostCalculationService.FormatCurrency(totalCost, "USD")}");
         _logger.Information($"Average response time: {overallAvgTime:F1}s");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         // Table
-        Console.WriteLine("┌──────────────────────┬──────────┬────────────┬────────────┬────────────┬──────────┬────────────┐");
-        Console.WriteLine("│ Model                │ Calls    │ Input      │ Output     │ Total      │ Avg Time │ Cost       │");
-        Console.WriteLine("├──────────────────────┼──────────┼────────────┼────────────┼────────────┼──────────┼────────────┤");
+        _consoleOutput.WriteLine("┌──────────────────────┬──────────┬────────────┬────────────┬────────────┬──────────┬────────────┐");
+        _consoleOutput.WriteLine("│ Model                │ Calls    │ Input      │ Output     │ Total      │ Avg Time │ Cost       │");
+        _consoleOutput.WriteLine("├──────────────────────┼──────────┼────────────┼────────────┼────────────┼──────────┼────────────┤");
         
         foreach (var modelGroup in modelGroups)
         {
@@ -515,18 +533,18 @@ public class UsageMenuService
             var modelName = TruncateString(modelGroup.Key, 20);
             var costStr = CostCalculationService.FormatCurrency(cost, currency);
             
-            Console.WriteLine($"│ {modelName,-20} │ {calls,8:N0} │ {FormatTokenCount(inputTokens),10} │ {FormatTokenCount(outputTokens),10} │ {FormatTokenCount(modelTotalTokens),10} │ {avgTime,8:F1}s │ {costStr,10} │");
+            _consoleOutput.WriteLine($"│ {modelName,-20} │ {calls,8:N0} │ {FormatTokenCount(inputTokens),10} │ {FormatTokenCount(outputTokens),10} │ {FormatTokenCount(modelTotalTokens),10} │ {avgTime,8:F1}s │ {costStr,10} │");
         }
         
-        Console.WriteLine("├──────────────────────┼──────────┼────────────┼────────────┼────────────┼──────────┼────────────┤");
+        _consoleOutput.WriteLine("├──────────────────────┼──────────┼────────────┼────────────┼────────────┼──────────┼────────────┤");
         
         // Totals row
         var totalCostStr = CostCalculationService.FormatCurrency(totalCost, "USD");
-        Console.WriteLine($"│ {"TOTAL",-20} │ {totalCalls,8:N0} │ {FormatTokenCount(totalInputTokens),10} │ {FormatTokenCount(totalOutputTokens),10} │ {FormatTokenCount(totalTokens),10} │ {overallAvgTime,8:F1}s │ {totalCostStr,10} │");
-        Console.WriteLine("└──────────────────────┴──────────┴────────────┴────────────┴────────────┴──────────┴────────────┘");
+        _consoleOutput.WriteLine($"│ {"TOTAL",-20} │ {totalCalls,8:N0} │ {FormatTokenCount(totalInputTokens),10} │ {FormatTokenCount(totalOutputTokens),10} │ {FormatTokenCount(totalTokens),10} │ {overallAvgTime,8:F1}s │ {totalCostStr,10} │");
+        _consoleOutput.WriteLine("└──────────────────────┴──────────┴────────────┴────────────┴────────────┴──────────┴────────────┘");
         
         // Additional stats
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         var sessions = entriesList.GroupBy(e => e.SessionId).Count();
         _logger.Muted($"Sessions: {sessions}");
         
@@ -556,17 +574,17 @@ public class UsageMenuService
         
         // Daily summary first
         _logger.Information($"Month: {monthName}");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         var dailyGroups = entriesList
             .GroupBy(e => e.Timestamp.Date)
             .OrderBy(g => g.Key)
             .ToList();
         
-        Console.WriteLine("Daily Summary:");
-        Console.WriteLine("┌────────────┬──────────┬────────────┬────────────┬──────────┬────────────┐");
-        Console.WriteLine("│ Date       │ Calls    │ Input      │ Output     │ Avg Time │ Cost       │");
-        Console.WriteLine("├────────────┼──────────┼────────────┼────────────┼──────────┼────────────┤");
+        _consoleOutput.WriteLine("Daily Summary:");
+        _consoleOutput.WriteLine("┌────────────┬──────────┬────────────┬────────────┬──────────┬────────────┐");
+        _consoleOutput.WriteLine("│ Date       │ Calls    │ Input      │ Output     │ Avg Time │ Cost       │");
+        _consoleOutput.WriteLine("├────────────┼──────────┼────────────┼────────────┼──────────┼────────────┤");
         
         foreach (var dayGroup in dailyGroups)
         {
@@ -577,42 +595,42 @@ public class UsageMenuService
             var avgTime = dayGroup.Average(e => e.Duration);
             var cost = dayGroup.Where(e => e.Cost != null).Sum(e => e.Cost!.Amount);
             
-            Console.WriteLine($"│ {date,-10} │ {calls,8:N0} │ {FormatTokenCount(inputTokens),10} │ {FormatTokenCount(outputTokens),10} │ {avgTime,8:F1}s │ {CostCalculationService.FormatCurrency(cost, "USD"),10} │");
+            _consoleOutput.WriteLine($"│ {date,-10} │ {calls,8:N0} │ {FormatTokenCount(inputTokens),10} │ {FormatTokenCount(outputTokens),10} │ {avgTime,8:F1}s │ {CostCalculationService.FormatCurrency(cost, "USD"),10} │");
         }
         
-        Console.WriteLine("└────────────┴──────────┴────────────┴────────────┴──────────┴────────────┘");
+        _consoleOutput.WriteLine("└────────────┴──────────┴────────────┴────────────┴──────────┴────────────┘");
         
         // Then show model summary
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         DisplayUsageSummary(entriesList, monthName);
     }
     
     private async Task ExportReports()
     {
-        Console.Clear();
+        _consoleOutput.Clear();
         _logger.Information("═══ Export Reports ═══");
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         
         _logger.Information("1. Export as JSON");
         _logger.Information("2. Export as CSV");
         _logger.Information("3. Export as Markdown");
         _logger.Information("0. Back");
         
-        Console.WriteLine();
-        Console.Write("Select format: ");
+        _consoleOutput.WriteLine();
+        _consoleOutput.Write("Select format: ");
         
-        var format = Console.ReadLine()?.Trim();
+        var format = _consoleInput.ReadLine()?.Trim();
         if (format == "0" || string.IsNullOrEmpty(format))
             return;
         
         // Get date range
-        Console.WriteLine();
-        Console.Write($"Start date (YYYY-MM-DD) [{DateTime.Today.AddDays(-30):yyyy-MM-dd}]: ");
-        var startInput = Console.ReadLine()?.Trim();
+        _consoleOutput.WriteLine();
+        _consoleOutput.Write($"Start date (YYYY-MM-DD) [{DateTime.Today.AddDays(-30):yyyy-MM-dd}]: ");
+        var startInput = _consoleInput.ReadLine()?.Trim();
         var startDate = string.IsNullOrEmpty(startInput) ? DateTime.Today.AddDays(-30) : DateTime.Parse(startInput);
         
-        Console.Write($"End date (YYYY-MM-DD) [{DateTime.Today:yyyy-MM-dd}]: ");
-        var endInput = Console.ReadLine()?.Trim();
+        _consoleOutput.Write($"End date (YYYY-MM-DD) [{DateTime.Today:yyyy-MM-dd}]: ");
+        var endInput = _consoleInput.ReadLine()?.Trim();
         var endDate = string.IsNullOrEmpty(endInput) ? DateTime.Today : DateTime.Parse(endInput);
         
         var entries = await _reportingService.GetUsageEntriesAsync(startDate, endDate);
@@ -630,9 +648,9 @@ public class UsageMenuService
                 break;
         }
         
-        Console.WriteLine();
+        _consoleOutput.WriteLine();
         _logger.Information("Press any key to continue...");
-        Console.ReadKey(true);
+        _consoleInput.ReadKey(true);
     }
     
     private async Task ExportAsJson(IEnumerable<UsageEntry> entries, DateTime startDate, DateTime endDate)

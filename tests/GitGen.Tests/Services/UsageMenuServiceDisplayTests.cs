@@ -13,6 +13,8 @@ public class UsageMenuServiceDisplayTests
     private readonly Mock<IUsageReportingService> _reportingServiceMock;
     private readonly Mock<ISecureConfigurationService> _secureConfigMock;
     private readonly TestConsoleLogger _logger;
+    private readonly TestConsoleInput _consoleInput;
+    private readonly TestConsoleOutput _consoleOutput;
     private readonly UsageMenuService _service;
     
     public UsageMenuServiceDisplayTests()
@@ -20,11 +22,15 @@ public class UsageMenuServiceDisplayTests
         _reportingServiceMock = new Mock<IUsageReportingService>();
         _secureConfigMock = new Mock<ISecureConfigurationService>();
         _logger = new TestConsoleLogger();
+        _consoleInput = new TestConsoleInput();
+        _consoleOutput = new TestConsoleOutput();
         
         _service = new UsageMenuService(
             _logger,
             _reportingServiceMock.Object,
-            _secureConfigMock.Object);
+            _secureConfigMock.Object,
+            _consoleInput,
+            _consoleOutput);
     }
     
     #region Constructor Tests
@@ -36,7 +42,9 @@ public class UsageMenuServiceDisplayTests
         var service = new UsageMenuService(
             _logger,
             _reportingServiceMock.Object,
-            _secureConfigMock.Object);
+            _secureConfigMock.Object,
+            new TestConsoleInput(),
+            new TestConsoleOutput());
             
         service.Should().NotBeNull();
     }
@@ -49,7 +57,8 @@ public class UsageMenuServiceDisplayTests
     public async Task DisplayUsageSummary_EmptyEntries_ShowsNoUsageMessage()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("1\n\n0");
+        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         _reportingServiceMock
             .Setup(x => x.GetUsageEntriesAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(new List<UsageEntry>());
@@ -65,7 +74,8 @@ public class UsageMenuServiceDisplayTests
     public async Task DisplayUsageSummary_WithEntries_ShowsFormattedTable()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("1\n\n0");
+        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entries = new[]
         {
             new UsageEntryBuilder()
@@ -90,7 +100,7 @@ public class UsageMenuServiceDisplayTests
         await _service.RunAsync();
         
         // Assert
-        var output = console.GetOutput();
+        var output = _consoleOutput.GetOutput();
         output.Should().Contain("Period: Today");
         output.Should().Contain("Total calls: 2");
         output.Should().Contain("Total cost: $0.14");
@@ -103,7 +113,8 @@ public class UsageMenuServiceDisplayTests
     public async Task DisplayUsageSummary_ShowsSessionCount()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("1\n\n0");
+        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entries = new[]
         {
             new UsageEntryBuilder().WithSessionId("session-1").Build(),
@@ -126,7 +137,8 @@ public class UsageMenuServiceDisplayTests
     public async Task DisplayUsageSummary_ShowsMostActiveProject()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("1\n\n0");
+        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entries = new[]
         {
             new UsageEntryBuilder().WithProject("/project/a").Build(),
@@ -153,7 +165,8 @@ public class UsageMenuServiceDisplayTests
     public async Task DisplayMonthlyReport_WithData_ShowsDailySummaryTable()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("4\n\n0");
+        _consoleInput.AddLineInputs("4", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entries = new[]
         {
             new UsageEntryBuilder()
@@ -179,7 +192,7 @@ public class UsageMenuServiceDisplayTests
         await _service.RunAsync();
         
         // Assert
-        var output = console.GetOutput();
+        var output = _consoleOutput.GetOutput();
         output.Should().Contain("Daily Summary:");
         output.Should().Contain("┌────────────┬──────────┬────────────┬────────────┬──────────┬────────────┐");
         output.Should().Contain("│ Date       │ Calls    │ Input      │ Output     │ Avg Time │ Cost       │");
@@ -193,7 +206,8 @@ public class UsageMenuServiceDisplayTests
     public async Task DisplayDetailedRequests_FormatsTimeCorrectly()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("7\n1\n\n0\n0");
+        _consoleInput.AddLineInputs("7", "1", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var today = DateTime.Today;
         var yesterday = today.AddDays(-1);
         
@@ -215,7 +229,7 @@ public class UsageMenuServiceDisplayTests
         await _service.RunAsync();
         
         // Assert
-        var output = console.GetOutput();
+        var output = _consoleOutput.GetOutput();
         // Today's entry should show time only
         output.Should().Match("*14:30*" + "*│*");
         // Yesterday's entry should show date and time
@@ -226,7 +240,8 @@ public class UsageMenuServiceDisplayTests
     public async Task DisplayDetailedRequests_TruncatesLongModelNames()
     {
         // Arrange
-        using var console = new ConsoleTestHelper("7\n1\n\n0\n0");
+        _consoleInput.AddLineInputs("7", "1", "", "0", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entry = new UsageEntryBuilder()
             .WithModel("this-is-a-very-long-model-name-that-exceeds-the-column-width")
             .Build();
@@ -239,7 +254,7 @@ public class UsageMenuServiceDisplayTests
         await _service.RunAsync();
         
         // Assert
-        var output = console.GetOutput();
+        var output = _consoleOutput.GetOutput();
         output.Should().Contain("this-is-a-very-lon...");
     }
     
@@ -256,7 +271,8 @@ public class UsageMenuServiceDisplayTests
     public async Task FormatTokenCount_FormatsCorrectly(int tokens, string expected)
     {
         // Arrange
-        using var console = new ConsoleTestHelper("1\n\n0");
+        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         var entry = new UsageEntryBuilder()
             .WithTokens(tokens, 100)
             .Build();
@@ -269,7 +285,7 @@ public class UsageMenuServiceDisplayTests
         await _service.RunAsync();
         
         // Assert
-        var output = console.GetOutput();
+        var output = _consoleOutput.GetOutput();
         output.Should().Contain($"│ {expected,10} │");
     }
     
@@ -291,7 +307,8 @@ public class UsageMenuServiceDisplayTests
         var originalToday = DateTime.Today;
         typeof(DateTime).GetProperty("Today")?.SetValue(null, currentDate);
         
-        using var console = new ConsoleTestHelper("3\n\n0");
+        _consoleInput.AddLineInputs("3", "", "0");
+        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
         SetupMockData(new List<UsageEntry>());
         
         try
