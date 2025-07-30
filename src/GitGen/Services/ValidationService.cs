@@ -158,6 +158,10 @@ public static class ValidationService
             if (apiKey.Any(c => char.IsControl(c)))
                 return false;
 
+            // API keys should not contain whitespace
+            if (apiKey.Any(c => char.IsWhiteSpace(c)))
+                return false;
+
             return true;
         }
 
@@ -183,6 +187,9 @@ public static class ValidationService
 
             if (apiKey.Any(c => char.IsControl(c)))
                 return "API key cannot contain control characters";
+
+            if (apiKey.Any(c => char.IsWhiteSpace(c)))
+                return "API key cannot contain whitespace";
 
             return "API key is invalid";
         }

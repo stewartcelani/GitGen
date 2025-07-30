@@ -46,4 +46,89 @@ public class PlatformHelperTests
         else if (PlatformHelper.IsLinux())
             platformName.Should().Be("Linux");
     }
+
+    [Fact]
+    public void IsWindows_ReturnsCorrectValue()
+    {
+        // Act
+        var result = PlatformHelper.IsWindows();
+
+        // Assert
+        result.Should().Be(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
+    }
+
+    [Fact]
+    public void IsMacOS_ReturnsCorrectValue()
+    {
+        // Act
+        var result = PlatformHelper.IsMacOS();
+
+        // Assert
+        result.Should().Be(RuntimeInformation.IsOSPlatform(OSPlatform.OSX));
+    }
+
+    [Fact]
+    public void IsLinux_ReturnsCorrectValue()
+    {
+        // Act
+        var result = PlatformHelper.IsLinux();
+
+        // Assert
+        result.Should().Be(RuntimeInformation.IsOSPlatform(OSPlatform.Linux));
+    }
+
+    [Fact]
+    public void PlatformMethods_AreConsistent()
+    {
+        // Act
+        var isWindows = PlatformHelper.IsWindows();
+        var isMacOS = PlatformHelper.IsMacOS();
+        var isLinux = PlatformHelper.IsLinux();
+        var platformName = PlatformHelper.GetPlatformName();
+
+        // Assert - Platform name should match boolean methods
+        if (isWindows)
+        {
+            isMacOS.Should().BeFalse();
+            isLinux.Should().BeFalse();
+            platformName.Should().Be("Windows");
+        }
+        else if (isMacOS)
+        {
+            isWindows.Should().BeFalse();
+            isLinux.Should().BeFalse();
+            platformName.Should().Be("macOS");
+        }
+        else if (isLinux)
+        {
+            isWindows.Should().BeFalse();
+            isMacOS.Should().BeFalse();
+            platformName.Should().Be("Linux");
+        }
+        else
+        {
+            // This should not happen on supported platforms
+            platformName.Should().Be("Unknown");
+        }
+    }
+
+    [Fact]
+    public void GetPlatformName_ReturnsUnknown_WhenNoPlatformMatches()
+    {
+        // This test validates the logic, even though "Unknown" should never occur
+        // on supported platforms. The test ensures the method handles all cases.
+        
+        // Act
+        var platformName = PlatformHelper.GetPlatformName();
+
+        // Assert
+        if (!PlatformHelper.IsWindows() && !PlatformHelper.IsMacOS() && !PlatformHelper.IsLinux())
+        {
+            platformName.Should().Be("Unknown");
+        }
+        else
+        {
+            platformName.Should().NotBe("Unknown");
+        }
+    }
 }

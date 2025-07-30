@@ -76,8 +76,11 @@ public class SystemConsoleInput : IConsoleInput
         // Then remove any other ANSI escape sequences
         cleaned = AnsiEscapeRegex.Replace(cleaned, "");
 
+        // Replace null characters with spaces
+        cleaned = Regex.Replace(cleaned, @"\x00", " ");
+        
         // Also clean up any other control characters except standard whitespace
-        cleaned = Regex.Replace(cleaned, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
+        cleaned = Regex.Replace(cleaned, @"[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
 
         // Final cleanup: remove literal bracket paste markers that might have been pasted as text
         // Handle various forms these might appear in
@@ -88,7 +91,8 @@ public class SystemConsoleInput : IConsoleInput
                         .Replace("[2~", "");
 
         // Also clean up cases where the brackets might be encoded differently
-        cleaned = Regex.Replace(cleaned, @"\[?\d{3}~", ""); // Matches [200~, 200~, [201~, 201~, etc.
+        cleaned = Regex.Replace(cleaned, @"\[\d{3}~", ""); // Matches [200~, [201~, etc.
+        cleaned = Regex.Replace(cleaned, @"(?<!\[)\d{3}~", ""); // Matches 200~, 201~ when not preceded by [
 
         // Specific pattern for the exact issue we're seeing: [2 at start, 1~ at end
         if (cleaned.StartsWith("[2") && cleaned.EndsWith("1~"))

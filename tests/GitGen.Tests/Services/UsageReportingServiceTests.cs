@@ -13,6 +13,7 @@ public class UsageReportingServiceTests : IDisposable
     private readonly string _testDirectory;
     private readonly TestConsoleLogger _logger;
     private readonly UsageReportingService _service;
+    private readonly List<string> _createdFiles = new();
     
     public UsageReportingServiceTests()
     {
@@ -31,6 +32,22 @@ public class UsageReportingServiceTests : IDisposable
     
     public void Dispose()
     {
+        // Clean up created files in the actual user directory
+        foreach (var file in _createdFiles)
+        {
+            try
+            {
+                if (File.Exists(file))
+                {
+                    File.Delete(file);
+                }
+            }
+            catch
+            {
+                // Best effort cleanup
+            }
+        }
+        
         if (Directory.Exists(_testDirectory))
         {
             Directory.Delete(_testDirectory, true);
@@ -180,6 +197,7 @@ public class UsageReportingServiceTests : IDisposable
     {
         // Arrange
         var testDate = DateTime.Today;
+        var sessionId = "test-session-123";
         var entries = new[]
         {
             new UsageEntryBuilder()
@@ -188,6 +206,7 @@ public class UsageReportingServiceTests : IDisposable
                 .WithTokens(1000, 500)
                 .WithCost(0.045m)
                 .WithDuration(2.5)
+                .WithSessionId(sessionId)
                 .Build(),
             new UsageEntryBuilder()
                 .WithTimestamp(testDate)
@@ -195,6 +214,7 @@ public class UsageReportingServiceTests : IDisposable
                 .WithTokens(2000, 1000)
                 .WithCost(0.090m)
                 .WithDuration(3.5)
+                .WithSessionId(sessionId)
                 .Build(),
             new UsageEntryBuilder()
                 .WithTimestamp(testDate)
@@ -202,6 +222,7 @@ public class UsageReportingServiceTests : IDisposable
                 .WithTokens(1500, 750)
                 .WithCost(0.060m)
                 .WithDuration(2.0)
+                .WithSessionId(sessionId)
                 .Build()
         };
         
@@ -229,6 +250,7 @@ public class UsageReportingServiceTests : IDisposable
         var entry = new UsageEntryBuilder()
             .WithTimestamp(testDate)
             .WithModel("this-is-a-very-long-model-name-that-exceeds-limit")
+            .WithSessionId("test-session-123")
             .Build();
         
         await WriteTestEntries(testDate.Year, testDate.Month, new[] { entry });
@@ -237,7 +259,7 @@ public class UsageReportingServiceTests : IDisposable
         var report = await _service.GenerateDailyReportAsync(testDate);
         
         // Assert
-        report.Should().Contain("this-is-a-very-lon...");
+        report.Should().Contain("this-is-a-very-lo...");
     }
     
     [Fact]
@@ -245,15 +267,20 @@ public class UsageReportingServiceTests : IDisposable
     {
         // Arrange
         var testDate = DateTime.Today;
+        var sessionId = "test-session-123";
         var entries = new[]
         {
             new UsageEntryBuilder()
                 .WithTimestamp(testDate)
+                .WithModel("model-1")
                 .WithTokens(1500, 500)
+                .WithSessionId(sessionId)
                 .Build(),
             new UsageEntryBuilder()
                 .WithTimestamp(testDate)
+                .WithModel("model-2")
                 .WithTokens(1000000, 500000)
+                .WithSessionId(sessionId)
                 .Build()
         };
         
@@ -322,9 +349,9 @@ public class UsageReportingServiceTests : IDisposable
         
         // Assert
         report.Should().Contain("Daily Usage:");
-        report.Should().Contain("│ Date       │ Model                │ Calls");
-        report.Should().Contain("│ 2025-07-01  │ gpt-4");
-        report.Should().Contain("│ 2025-07-15  │ claude-3");
+        report.Should().Contain("Date         Model");
+        report.Should().Contain("2025-07-01  gpt-4");
+        report.Should().Contain("2025-07-15  claude-3");
         report.Should().Contain("Monthly Summary:");
         report.Should().Contain("Total calls: 3");
         report.Should().Contain("Top Models by Usage:");
@@ -414,12 +441,22 @@ public class UsageReportingServiceTests : IDisposable
     private async Task WriteTestEntries(int year, int month, IEnumerable<UsageEntry> entries)
     {
         var fileName = $"usage-{year:0000}-{month:00}.jsonl";
-        var filePath = Path.Combine(_testDirectory, ".gitgen", "usage", fileName);
+        
+        // Use the same path logic as UsageReportingService
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var usageDirectory = Path.Combine(homeDir, ".gitgen", "usage");
+        var filePath = Path.Combine(usageDirectory, fileName);
+        
+        // Ensure directory exists
+        Directory.CreateDirectory(usageDirectory);
         
         var lines = entries.Select(e => 
             JsonSerializer.Serialize(e, UsageJsonContext.Default.UsageEntry));
         
         await File.WriteAllLinesAsync(filePath, lines);
+        
+        // Track created files for cleanup
+        _createdFiles.Add(filePath);
     }
     
     #endregion

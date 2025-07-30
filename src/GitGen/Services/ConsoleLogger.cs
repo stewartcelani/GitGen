@@ -149,7 +149,7 @@ public class ConsoleLoggerFactory
     /// </summary>
     /// <typeparam name="T">The type to use for the logger category name.</typeparam>
     /// <returns>A new <see cref="IConsoleLogger" /> instance.</returns>
-    public IConsoleLogger CreateLogger<T>()
+    public virtual IConsoleLogger CreateLogger<T>()
     {
         return new ConsoleLogger(typeof(T).Name);
     }
@@ -159,7 +159,7 @@ public class ConsoleLoggerFactory
     /// </summary>
     /// <param name="categoryName">The category name for the logger.</param>
     /// <returns>A new <see cref="IConsoleLogger" /> instance.</returns>
-    public IConsoleLogger CreateLogger(string categoryName)
+    public virtual IConsoleLogger CreateLogger(string categoryName)
     {
         return new ConsoleLogger(categoryName);
     }
