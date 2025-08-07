@@ -210,36 +210,37 @@ public class HttpClientService : IHttpClientService
         options ??= new HttpRequestOptions();
         var errorFormatter = new HttpErrorFormatter(_logger);
 
-        return await _retryPolicy.ExecuteAsync(async () =>
+        var response = await _retryPolicy.ExecuteAsync(async () =>
         {
             var clonedRequest = await CloneHttpRequestMessageAsync(request);
-            var response = await _httpClient.SendAsync(clonedRequest);
+            return await _httpClient.SendAsync(clonedRequest);
+        });
 
-            if (!response.IsSuccessStatusCode)
+        // Check response after retry policy completes
+        if (!response.IsSuccessStatusCode)
+        {
+            var responseBody = await response.Content.ReadAsStringAsync();
+
+            // Log error if not suppressed
+            if (!options.SuppressErrorLogging)
             {
-                var responseBody = await response.Content.ReadAsStringAsync();
-
-                // Log error if not suppressed
-                if (!options.SuppressErrorLogging)
-                {
-                    errorFormatter.LogHttpError(response, responseBody, options);
-                }
-
-                // Throw exception if requested
-                if (options.ThrowOnError)
-                {
-                    throw new HttpResponseException(
-                        response.StatusCode,
-                        clonedRequest.RequestUri?.ToString(),
-                        clonedRequest.Method.ToString(),
-                        responseBody,
-                        options.IncludeResponseBodyInException ? responseBody : null,
-                        options.ErrorContext);
-                }
+                errorFormatter.LogHttpError(response, responseBody, options);
             }
 
-            return response;
-        });
+            // Throw exception if requested
+            if (options.ThrowOnError)
+            {
+                throw new HttpResponseException(
+                    response.StatusCode,
+                    response.RequestMessage?.RequestUri?.ToString(),
+                    response.RequestMessage?.Method.ToString(),
+                    responseBody,
+                    options.IncludeResponseBodyInException ? responseBody : null,
+                    options.ErrorContext);
+            }
+        }
+
+        return response;
     }
 
     private static async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage req)

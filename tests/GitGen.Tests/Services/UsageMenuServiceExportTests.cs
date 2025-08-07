@@ -56,7 +56,9 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportReports_CancelSelection_ReturnsToMenu()
     {
         // Arrange
-        _consoleInput.AddLineInputs("8", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInput("0"); // Back from export menu
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -83,8 +85,10 @@ public class UsageMenuServiceExportTests : IDisposable
         // Arrange
         var startDate = new DateTime(2025, 7, 1);
         var endDate = new DateTime(2025, 7, 31);
-        _consoleInput.AddLineInputs("8", "1", $"{startDate:yyyy-MM-dd}", $"{endDate:yyyy-MM-dd}", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("1", $"{startDate:yyyy-MM-dd}", $"{endDate:yyyy-MM-dd}"); // Select JSON format and dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         
         var entry = new UsageEntryBuilder().Build();
         SetupMockData(new[] { entry });
@@ -117,8 +121,10 @@ public class UsageMenuServiceExportTests : IDisposable
         // Arrange
         var startDate = new DateTime(2025, 7, 1);
         var endDate = new DateTime(2025, 7, 31);
-        _consoleInput.AddLineInputs("8", "1", $"{startDate:yyyy-MM-dd}", $"{endDate:yyyy-MM-dd}", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("1", $"{startDate:yyyy-MM-dd}", $"{endDate:yyyy-MM-dd}"); // Select JSON format and dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         
         SetupMockData(new List<UsageEntry>());
         _reportingServiceMock
@@ -142,8 +148,10 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsCsv_CreatesValidCsvFile()
     {
         // Arrange
-        _consoleInput.AddLineInputs("8", "2", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("2", "", ""); // Select CSV format, default dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         
         var entries = new[]
         {
@@ -193,8 +201,10 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsCsv_HandlesNullCost()
     {
         // Arrange
-        _consoleInput.AddLineInputs("8", "2", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("2", "", ""); // Select CSV format, default dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         
         var entry = new UsageEntryBuilder().Build();
         entry.Cost = null;
@@ -219,8 +229,10 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsMarkdown_CreatesValidMarkdownFile()
     {
         // Arrange
-        _consoleInput.AddLineInputs("8", "3", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("3", "", ""); // Select Markdown format, default dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         
         var entries = new[]
         {
@@ -267,8 +279,10 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task ExportAsMarkdown_FormatsTokensCorrectly()
     {
         // Arrange
-        _consoleInput.AddLineInputs("8", "3", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("3", "", ""); // Select Markdown format, default dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         
         var entry = new UsageEntryBuilder()
             .WithTokens(1500000, 500000)
@@ -296,18 +310,27 @@ public class UsageMenuServiceExportTests : IDisposable
     public async Task Export_DefaultDates_UsesLast30DaysToToday()
     {
         // Arrange
-        _consoleInput.AddLineInputs("8", "1", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("1", "", ""); // Select JSON format, default dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         
         DateTime capturedStart = default;
         DateTime capturedEnd = default;
+        int callCount = 0;
         
         _reportingServiceMock
             .Setup(x => x.GetUsageEntriesAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .Callback<DateTime, DateTime>((start, end) =>
             {
-                capturedStart = start;
-                capturedEnd = end;
+                callCount++;
+                // Skip the initial menu calls (4 calls for today, week, month, all-time stats)
+                // Capture only the export call (5th call)
+                if (callCount == 5)
+                {
+                    capturedStart = start;
+                    capturedEnd = end;
+                }
             })
             .ReturnsAsync(new List<UsageEntry>());
             

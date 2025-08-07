@@ -50,6 +50,25 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         {
             // Track if a specific model was requested
             bool specificModelRequested = !string.IsNullOrEmpty(modelName);
+            
+            // Check if we might be running in PowerShell without proper @ escaping
+            if (!specificModelRequested && IsRunningInPowerShell())
+            {
+                // Check if there are git changes - if so, user might have tried to use @ syntax
+                if (_gitService.IsGitRepository())
+                {
+                    var diff = _gitService.GetRepositoryDiff();
+                    if (!string.IsNullOrWhiteSpace(diff))
+                    {
+                        _logger.Debug("No model specified but git changes detected - possible PowerShell @ issue");
+                        Console.WriteLine();
+                        _logger.Information($"{Constants.UI.InfoSymbol} No model specified, using default model.");
+                        _logger.Muted("💡 PowerShell Tip: If you meant to use @model syntax, remember to quote it:");
+                        _logger.Muted("   gitgen \"@fast\" or gitgen '@free' or gitgen `@smart");
+                        Console.WriteLine();
+                    }
+                }
+            }
 
             // Load configuration
             var activeModel = await _configService.LoadConfigurationAsync(modelName);
@@ -656,5 +675,30 @@ public class GenerationOrchestrator : IGenerationOrchestrator
         }
 
         return EstimateTokens(new string('x', basePromptSize));
+    }
+    
+    private static bool IsRunningInPowerShell()
+    {
+        try
+        {
+            // Check if parent process is PowerShell
+            var parentProcess = Environment.GetEnvironmentVariable("PSModulePath");
+            if (!string.IsNullOrEmpty(parentProcess))
+            {
+                return true;
+            }
+            
+            // Alternative check: See if we're in Windows Terminal or PowerShell
+            var term = Environment.GetEnvironmentVariable("TERM_PROGRAM");
+            var shell = Environment.GetEnvironmentVariable("SHELL");
+            var psVersion = Environment.GetEnvironmentVariable("PSVersionTable");
+            
+            return !string.IsNullOrEmpty(psVersion);
+        }
+        catch
+        {
+            // If we can't determine, assume we're not in PowerShell
+            return false;
+        }
     }
 }

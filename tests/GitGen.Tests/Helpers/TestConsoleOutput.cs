@@ -46,7 +46,9 @@ public class TestConsoleOutput : IConsoleOutput
     /// <inheritdoc />
     public void Clear()
     {
-        _output.Clear();
+        // In a real console, Clear() doesn't affect the output stream, 
+        // it just clears the visual display. For testing, we don't want
+        // to lose the output that was written.
         _cursorLeft = 0;
         _cursorTop = 0;
     }

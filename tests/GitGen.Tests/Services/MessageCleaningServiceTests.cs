@@ -98,7 +98,7 @@ Last line");
     public void CleanLlmResponse_WithNull_ReturnsFallbackMessage()
     {
         // Act
-        var result = MessageCleaningService.CleanLlmResponse(null!);
+        var result = MessageCleaningService.CleanLlmResponse(null as string);
         
         // Assert
         result.Should().Be(Constants.Fallbacks.NoResponseMessage);

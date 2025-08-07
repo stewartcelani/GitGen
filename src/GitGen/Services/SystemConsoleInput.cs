@@ -91,7 +91,7 @@ public class SystemConsoleInput : IConsoleInput
                         .Replace("[2~", "");
 
         // Also clean up cases where the brackets might be encoded differently
-        cleaned = Regex.Replace(cleaned, @"\[\d{3}~", ""); // Matches [200~, [201~, etc.
+        cleaned = Regex.Replace(cleaned, @"\[\d+~", ""); // Matches [200~, [201~, [4567~, etc.
         cleaned = Regex.Replace(cleaned, @"(?<!\[)\d{3}~", ""); // Matches 200~, 201~ when not preceded by [
 
         // Specific pattern for the exact issue we're seeing: [2 at start, 1~ at end

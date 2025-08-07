@@ -33,7 +33,7 @@ public class CommitMessageGenerator
     /// <returns>A <see cref="CommitMessageResult" /> containing the cleaned message and token usage statistics.</returns>
     /// <exception cref="ArgumentException">Thrown when the diff is null or empty.</exception>
     /// <exception cref="AuthenticationException">Thrown when authentication with the AI provider fails.</exception>
-    public async Task<CommitMessageResult> GenerateAsync(ModelConfiguration modelConfig, string diff,
+    public virtual async Task<CommitMessageResult> GenerateAsync(ModelConfiguration modelConfig, string diff,
         string? customInstruction = null)
     {
         if (string.IsNullOrWhiteSpace(diff)) throw new ArgumentException("Diff cannot be null or empty", nameof(diff));

@@ -27,7 +27,7 @@ public class ConfigurationService
     /// </summary>
     /// <param name="modelName">Optional specific model name to load.</param>
     /// <returns>The configuration for the specified or default model.</returns>
-    public async Task<ModelConfiguration?> LoadConfigurationAsync(string? modelName = null)
+    public virtual async Task<ModelConfiguration?> LoadConfigurationAsync(string? modelName = null)
     {
         _logger.Debug($"LoadConfigurationAsync called with modelName: '{modelName ?? "(null)"}'");
 
@@ -107,7 +107,7 @@ public class ConfigurationService
     ///     Checks if any models are configured in secure storage.
     /// </summary>
     /// <returns>True if at least one model exists; otherwise, false.</returns>
-    public async Task<bool> HasModelsAsync()
+    public virtual async Task<bool> HasModelsAsync()
     {
         if (_secureConfig == null)
             return false;
@@ -120,7 +120,7 @@ public class ConfigurationService
     ///     Checks if the default model configuration needs healing.
     /// </summary>
     /// <returns>True if healing is needed; otherwise, false.</returns>
-    public async Task<bool> NeedsDefaultModelHealingAsync()
+    public virtual async Task<bool> NeedsDefaultModelHealingAsync()
     {
         if (_secureConfig == null)
             return false;

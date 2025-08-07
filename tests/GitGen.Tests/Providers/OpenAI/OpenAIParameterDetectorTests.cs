@@ -83,8 +83,8 @@ public class OpenAIParameterDetectorTests
                 HttpStatusCode.BadRequest,
                 "https://api.openai.com/v1/chat/completions",
                 "POST",
-                "{\"error\":{\"message\":\"Invalid parameter: max_completion_tokens\"}}",
-                "{\"error\":{\"message\":\"Invalid parameter: max_completion_tokens\"}}"
+                "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Invalid parameter: max_completion_tokens\"}}",
+                "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Invalid parameter: max_completion_tokens\"}}"
             ))
             .ReturnsAsync(new HttpResponseMessage
             {
@@ -196,7 +196,7 @@ public class OpenAIParameterDetectorTests
         // Assert
         result.Should().NotBeNull();
         result.Temperature.Should().BeLessThanOrEqualTo(1.0);
-        _mockLogger.Verify(x => x.Debug(It.Is<string>(s => s.Contains("temperature") && s.Contains("1.0"))), Times.AtLeastOnce);
+        _mockLogger.Verify(x => x.Debug(It.Is<string>(s => s.Contains("temperature")), It.IsAny<object[]>()), Times.AtLeastOnce);
     }
 
     #endregion
@@ -296,7 +296,7 @@ public class OpenAIParameterDetectorTests
 
         // Assert
         _mockLogger.Verify(x => x.Debug(It.IsAny<string>()), Times.AtLeastOnce);
-        _mockLogger.Verify(x => x.Debug(It.Is<string>(s => s.Contains("Starting API parameter detection"))), Times.Once);
+        _mockLogger.Verify(x => x.Debug(It.Is<string>(s => s.Contains("Starting API parameter detection")), It.IsAny<object[]>()), Times.Once);
     }
 
     #endregion

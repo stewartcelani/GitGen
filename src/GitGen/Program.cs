@@ -304,6 +304,11 @@ internal class Program
             Console.WriteLine("💡 Tip: Configure a free model as @free to save money on public repositories");
             Console.WriteLine("   where sending code to free APIs doesn't matter.");
             Console.WriteLine();
+            Console.WriteLine("⚠️  PowerShell Users: The @ symbol must be quoted or escaped:");
+            Console.WriteLine("   gitgen \"@fast\"    # Use quotes");
+            Console.WriteLine("   gitgen '@free'    # Single quotes work too");
+            Console.WriteLine("   gitgen `@smart    # Or use backtick to escape");
+            Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  -d, --debug            Enable debug logging");
             Console.WriteLine("  -p, --preview          Preview mode - show what would happen without calling LLM");

@@ -33,11 +33,11 @@ public class ProviderFactory
     /// <exception cref="NotSupportedException">Thrown when the provider type is not supported.</exception>
     public virtual ICommitMessageProvider CreateProvider(ModelConfiguration modelConfig)
     {
-        // Handle null case for test mocking scenarios
+        // Handle null case
         if (modelConfig == null)
-            return null!;
+            throw new ArgumentNullException(nameof(modelConfig), "Model configuration cannot be null");
 
-        var type = modelConfig.Type?.ToLowerInvariant();
+        var type = modelConfig.Type?.Trim().ToLowerInvariant();
 
         return type switch
         {

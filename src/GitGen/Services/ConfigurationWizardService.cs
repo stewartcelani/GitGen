@@ -42,7 +42,7 @@ public class ConfigurationWizardService
     ///     Guides the user through provider selection, configuration, testing, and persistence.
     /// </summary>
     /// <returns>The configured <see cref="ModelConfiguration" /> if successful; otherwise, null if cancelled or failed.</returns>
-    public async Task<ModelConfiguration?> RunWizardAsync()
+    public virtual async Task<ModelConfiguration?> RunWizardAsync()
     {
         // Always use the new multi-model wizard
         if (_secureConfigService == null)

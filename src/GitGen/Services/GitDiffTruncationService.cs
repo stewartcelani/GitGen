@@ -29,7 +29,7 @@ public class GitDiffTruncationService
     /// <param name="maxTokens">The maximum number of tokens allowed.</param>
     /// <param name="systemPromptTokens">Estimated tokens used by the system prompt.</param>
     /// <returns>A truncated version of the diff that should fit within the token limit.</returns>
-    public string TruncateDiff(string diff, int maxTokens, int systemPromptTokens)
+    public virtual string TruncateDiff(string diff, int maxTokens, int systemPromptTokens)
     {
         // Calculate available tokens for the diff
         var availableTokens = maxTokens - systemPromptTokens;

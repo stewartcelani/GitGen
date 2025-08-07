@@ -34,7 +34,10 @@ public class SecureConfigurationService : ISecureConfigurationService
         _protector = dataProtectionProvider.CreateProtector("GitGen.Configuration");
 
         // Set up configuration directory in user's home
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        // Check environment variables first (for testing), then fall back to GetFolderPath
+        var homeDir = Environment.GetEnvironmentVariable("USERPROFILE") ?? 
+                      Environment.GetEnvironmentVariable("HOME") ??
+                      Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var gitgenDir = Path.Combine(homeDir, ".gitgen");
         Directory.CreateDirectory(gitgenDir);
         _configPath = Path.Combine(gitgenDir, "config.json");
@@ -657,15 +660,15 @@ public class SecureConfigurationService : ISecureConfigurationService
         // Normalize the partial string by removing @ prefix if present
         var normalizedPartial = partial.TrimStart('@');
 
-        // Find models where name or any alias starts with the partial string (case-insensitive)
+        // Find models where name or any alias contains the partial string (case-insensitive)
         // Check both with and without @ prefix for robustness
         var matches = settings.Models.Where(m =>
-            m.Name.StartsWith(partial, StringComparison.OrdinalIgnoreCase) ||
-            m.Name.StartsWith(normalizedPartial, StringComparison.OrdinalIgnoreCase) ||
+            m.Name.Contains(partial, StringComparison.OrdinalIgnoreCase) ||
+            m.Name.Contains(normalizedPartial, StringComparison.OrdinalIgnoreCase) ||
             (m.Aliases != null && m.Aliases.Any(alias =>
-                alias.StartsWith(partial, StringComparison.OrdinalIgnoreCase) ||
-                alias.StartsWith(normalizedPartial, StringComparison.OrdinalIgnoreCase) ||
-                ("@" + alias).StartsWith(partial, StringComparison.OrdinalIgnoreCase)))
+                alias.Contains(partial, StringComparison.OrdinalIgnoreCase) ||
+                alias.Contains(normalizedPartial, StringComparison.OrdinalIgnoreCase) ||
+                ("@" + alias).Contains(partial, StringComparison.OrdinalIgnoreCase)))
         ).ToList();
 
         _logger.Debug($"Partial match results for '{partial}': {matches.Count} matches");
@@ -772,7 +775,10 @@ public class SecureConfigurationService : ISecureConfigurationService
     /// </summary>
     private static string GetKeyStorePath()
     {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        // Check environment variables first (for testing), then fall back to GetFolderPath
+        var homeDir = Environment.GetEnvironmentVariable("USERPROFILE") ?? 
+                      Environment.GetEnvironmentVariable("HOME") ??
+                      Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var keyPath = Path.Combine(homeDir, ".gitgen", "keys");
         Directory.CreateDirectory(keyPath);
         return keyPath;
@@ -828,5 +834,13 @@ public class SecureConfigurationService : ISecureConfigurationService
         // if (settings.Version == "4.0") { ... migrate to 5.0 ... }
 
         return settings;
+    }
+    
+    /// <summary>
+    ///     Clears the cached settings. This is primarily for testing purposes.
+    /// </summary>
+    public void ClearCache()
+    {
+        _cachedSettings = null;
     }
 }

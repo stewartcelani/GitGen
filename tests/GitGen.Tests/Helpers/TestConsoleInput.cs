@@ -57,6 +57,24 @@ public class TestConsoleInput : IConsoleInput
     }
 
     /// <summary>
+    ///     Adds a key press using the specified ConsoleKey.
+    /// </summary>
+    public void AddKeyInput(ConsoleKey key)
+    {
+        char keyChar = key switch
+        {
+            ConsoleKey.Enter => '\r',
+            ConsoleKey.Escape => '\x1B',
+            ConsoleKey.Backspace => '\b',
+            ConsoleKey.Tab => '\t',
+            ConsoleKey.Spacebar => ' ',
+            _ => (char)0
+        };
+        
+        _keyInputs.Enqueue(new ConsoleKeyInfo(keyChar, key, false, false, false));
+    }
+
+    /// <summary>
     ///     Adds a password that will be returned by the next call to ReadPassword.
     /// </summary>
     public void AddPasswordInput(string password)

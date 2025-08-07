@@ -74,19 +74,33 @@ public class SystemConsoleInputTests
 
     #region CleanInput Tests - Control Characters
 
-    [Theory]
-    [InlineData("text\0with\0nulls", "textwith nulls")] // Null characters
-    [InlineData("text\x01\x02\x03", "text")] // Various control chars
-    [InlineData("text\x07bell", "textbell")] // Bell character
-    [InlineData("text\x1Bescape", "textescape")] // Escape character
-    [InlineData("text\x7Fdelete", "textdelete")] // Delete character
-    public void CleanInput_RemovesControlCharacters(string input, string expected)
+    [Fact]
+    public void CleanInput_RemovesControlCharacters()
     {
-        // Act
-        var result = InvokeCleanInput(input);
-
-        // Assert
-        result.Should().Be(expected);
+        // Test null characters - they should be replaced with spaces
+        var input1 = "text" + "\0" + "with" + "\0" + "nulls";
+        var result1 = InvokeCleanInput(input1);
+        result1.Should().Be("text with nulls");
+        
+        // Test various control characters
+        var input2 = "text" + "\x01\x02\x03";
+        var result2 = InvokeCleanInput(input2);
+        result2.Should().Be("text");
+        
+        // Test bell character
+        var input3 = "text" + "\x07" + "bell";
+        var result3 = InvokeCleanInput(input3);
+        result3.Should().Be("textbell");
+        
+        // Test escape character
+        var input4 = "text" + "\x1B" + "escape";
+        var result4 = InvokeCleanInput(input4);
+        result4.Should().Be("textescape");
+        
+        // Test delete character
+        var input5 = "text" + "\x7F" + "delete";
+        var result5 = InvokeCleanInput(input5);
+        result5.Should().Be("textdelete");
     }
 
     [Theory]
@@ -151,7 +165,7 @@ public class SystemConsoleInputTests
 
     [Theory]
     [InlineData("[123~", "")] // Three digit pattern
-    [InlineData("[4567~", "7~")] // Four digit pattern (only removes first 3)
+    [InlineData("[4567~", "")] // Four digit pattern - should remove entire pattern
     [InlineData("text[200~more", "textmore")] // Pattern in middle
     [InlineData("[2~", "")] // Specific pattern from code
     public void CleanInput_RemovesSpecificBracketPatterns(string input, string expected)

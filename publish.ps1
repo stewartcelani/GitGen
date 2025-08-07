@@ -114,10 +114,17 @@ function Test-PreFlightValidation {
         return $false
     }
 
-    # Test build
-    Write-Host "   Testing project build..." -ForegroundColor Gray
+    # Clean before test build
+    Write-Host "   Cleaning before build..." -ForegroundColor Gray
+    $cleanOutput = & dotnet clean $CsprojPath -c Release --verbosity quiet 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "   ⚠️ Clean returned exit code: $LASTEXITCODE" -ForegroundColor Yellow
+    }
+    
+    # Test build with --no-incremental to force fresh build
+    Write-Host "   Testing project build (clean, non-incremental)..." -ForegroundColor Gray
     try {
-        $buildOutput = & dotnet build $CsprojPath -c Release --verbosity quiet 2>&1
+        $buildOutput = & dotnet build $CsprojPath -c Release --no-incremental --verbosity quiet 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host "   ✅ Build successful" -ForegroundColor Green
             return $true
@@ -161,6 +168,41 @@ function Clear-OutputDirectory {
     }
 }
 
+function Clean-BuildArtifacts {
+    Write-Host "🧹 Cleaning build artifacts..." -ForegroundColor Cyan
+    
+    $dirsToClean = @(
+        "src\GitGen\bin",
+        "src\GitGen\obj",
+        "tests\GitGen.Tests\bin",
+        "tests\GitGen.Tests\obj"
+    )
+    
+    foreach ($dir in $dirsToClean) {
+        if (Test-Path $dir) {
+            Write-Host "   Removing $dir..." -ForegroundColor Gray
+            try {
+                Remove-Item $dir -Recurse -Force
+                Write-Host "   ✅ Cleaned $dir" -ForegroundColor Green
+            } catch {
+                Write-Host "   ⚠️ Could not clean ${dir}: $_" -ForegroundColor Yellow
+            }
+        }
+    }
+    
+    # Also run dotnet clean for good measure
+    Write-Host "   Running dotnet clean..." -ForegroundColor Gray
+    $cleanOutput = & dotnet clean src\GitGen\GitGen.csproj -c Release --verbosity quiet 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "   ✅ dotnet clean successful" -ForegroundColor Green
+    } else {
+        Write-Host "   ⚠️ dotnet clean returned exit code: $LASTEXITCODE" -ForegroundColor Yellow
+    }
+    
+    Write-Host "   ✅ Build artifacts cleaned" -ForegroundColor Green
+    return $true
+}
+
 function Publish-Runtime {
     param(
         [string]$RuntimeId,
@@ -181,6 +223,20 @@ function Publish-Runtime {
     }
     New-Item -ItemType Directory -Path $TargetOutputPath -Force | Out-Null
 
+    # First restore to ensure all dependencies are fresh
+    Write-Host "   Restoring dependencies..." -ForegroundColor Gray
+    $restoreArgs = @(
+        "restore",
+        "src\GitGen\GitGen.csproj",
+        "-r", $RuntimeId,
+        "--force"
+    )
+    
+    & dotnet $restoreArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "   ⚠️ Restore failed with exit code: $LASTEXITCODE" -ForegroundColor Yellow
+    }
+
     $publishArgs = @(
         "publish",
         "src\GitGen\GitGen.csproj",
@@ -188,9 +244,12 @@ function Publish-Runtime {
         "-r", $RuntimeId,
         "-o", $TargetOutputPath,
         "--self-contained", "true",
+        "--no-restore",
         "/p:PublishSingleFile=true",
         "/p:PublishTrimmed=true",
-        "/p:TrimMode=partial"
+        "/p:TrimMode=partial",
+        "/p:DebugType=none",
+        "/p:DebugSymbols=false"
     )
 
     try {
@@ -262,6 +321,13 @@ if (!(Test-PreFlightValidation -CsprojPath $CsprojPath)) {
     Write-Host "❌ Pre-flight validation failed. Aborting publish." -ForegroundColor Red
     Write-Host "💡 Please fix the issues above and try again." -ForegroundColor Yellow
     exit 1
+}
+Write-Host ""
+
+# Clean all build artifacts to ensure fresh build
+if (!(Clean-BuildArtifacts)) {
+    Write-Host ""
+    Write-Host "⚠️ Some build artifacts could not be cleaned, but continuing..." -ForegroundColor Yellow
 }
 Write-Host ""
 

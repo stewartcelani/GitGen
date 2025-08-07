@@ -143,6 +143,7 @@ public class UsageReportingServiceTests : IDisposable
             JsonSerializer.Serialize(validEntry, UsageJsonContext.Default.UsageEntry)
         };
         
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
         await File.WriteAllLinesAsync(filePath, lines);
         
         // Act
@@ -442,9 +443,8 @@ public class UsageReportingServiceTests : IDisposable
     {
         var fileName = $"usage-{year:0000}-{month:00}.jsonl";
         
-        // Use the same path logic as UsageReportingService
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var usageDirectory = Path.Combine(homeDir, ".gitgen", "usage");
+        // Use the test directory that was set up in constructor
+        var usageDirectory = Path.Combine(_testDirectory, ".gitgen", "usage");
         var filePath = Path.Combine(usageDirectory, fileName);
         
         // Ensure directory exists

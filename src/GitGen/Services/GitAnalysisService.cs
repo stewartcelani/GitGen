@@ -28,7 +28,7 @@ public class GitAnalysisService
     ///     Thrown if the current directory is not a Git repository or if Git
     ///     operations fail.
     /// </exception>
-    public string GetRepositoryDiff()
+    public virtual string GetRepositoryDiff()
     {
         try
         {
@@ -82,7 +82,7 @@ public class GitAnalysisService
     ///     Checks if the current directory is within a Git repository.
     /// </summary>
     /// <returns><c>true</c> if a Git repository is found; otherwise, <c>false</c>.</returns>
-    public bool IsGitRepository()
+    public virtual bool IsGitRepository()
     {
         try
         {

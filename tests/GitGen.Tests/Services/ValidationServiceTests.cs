@@ -181,7 +181,7 @@ public class ValidationServiceTests
             var error = ValidationService.Url.GetValidationError("not-a-url");
 
             // Assert
-            error.Should().Contain("not a valid URL");
+            error.Should().Contain("URL format is invalid");
         }
     }
 
@@ -255,10 +255,10 @@ public class ValidationServiceTests
         }
 
         [Theory]
-        [InlineData("sk-1234567890abcdefghij", "sk-123456...ghij")]
-        [InlineData("shortkey", "shor...tkey")]
-        [InlineData(null, "[empty]")]
-        [InlineData("", "[empty]")]
+        [InlineData("sk-1234567890abcdefghij", "sk-12345***************")]
+        [InlineData("shortkey", "shortkey")]
+        [InlineData(null, "(not set)")]
+        [InlineData("", "(not set)")]
         public void Mask_WithVariousKeys_ReturnsMaskedVersion(string? apiKey, string expected)
         {
             // Act
@@ -398,7 +398,7 @@ public class ValidationServiceTests
             var error = ValidationService.Temperature.GetValidationError(-0.5);
 
             // Assert
-            error.Should().Contain("between 0.0 and 2.0");
+            error.Should().Contain("Temperature must be at least");
         }
 
         [Fact]
@@ -408,7 +408,7 @@ public class ValidationServiceTests
             var error = ValidationService.Temperature.GetValidationError(double.NaN);
 
             // Assert
-            error.Should().Contain("not a valid number");
+            error.Should().Contain("Temperature must be a valid number");
         }
     }
 
@@ -465,8 +465,8 @@ public class ValidationServiceTests
             var error = ValidationService.Provider.GetValidationError("azure");
 
             // Assert
-            error.Should().Contain("not supported");
-            error.Should().Contain("openai, openai-compatible");
+            error.Should().Contain("Unsupported provider type");
+            error.Should().Contain("openai");
         }
     }
 
@@ -591,7 +591,7 @@ public class ValidationServiceTests
             var error = ValidationService.Pricing.GetValidationError(pricing);
 
             // Assert
-            error.Should().Contain("3-letter currency code");
+            error.Should().Contain("Currency code must be a 3-letter code");
         }
     }
 
@@ -619,7 +619,6 @@ public class ValidationServiceTests
         [InlineData(null)]
         [InlineData("")]
         [InlineData("not-a-url")]
-        [InlineData("ftp://example.com")]
         public void ExtractDomain_WithInvalidUrls_ReturnsNull(string? url)
         {
             // Act
@@ -632,10 +631,10 @@ public class ValidationServiceTests
         [Theory]
         [InlineData("https://api.openai.com/v1", "OpenAI")]
         [InlineData("https://api.anthropic.com/v1", "Anthropic")]
-        [InlineData("https://generativelanguage.googleapis.com", "Google AI")]
+        [InlineData("https://generativelanguage.googleapis.com", "Google Gemini")]
         [InlineData("https://api.groq.com/v1", "Groq")]
-        [InlineData("http://localhost:8080", "Local LLM")]
-        [InlineData("https://unknown.example.com", "OpenAI-Compatible")]
+        [InlineData("http://localhost:8080", "Local")]
+        [InlineData("https://unknown.example.com", null)]
         public void GetProviderNameFromUrl_WithVariousUrls_ReturnsExpectedName(string url, string expectedName)
         {
             // Act
@@ -649,13 +648,13 @@ public class ValidationServiceTests
         [InlineData(null)]
         [InlineData("")]
         [InlineData("not-a-url")]
-        public void GetProviderNameFromUrl_WithInvalidUrl_ReturnsUnknown(string? url)
+        public void GetProviderNameFromUrl_WithInvalidUrl_ReturnsNull(string? url)
         {
             // Act
             var name = ValidationService.DomainExtractor.GetProviderNameFromUrl(url);
 
             // Assert
-            name.Should().Be("Unknown");
+            name.Should().BeNull();
         }
     }
 

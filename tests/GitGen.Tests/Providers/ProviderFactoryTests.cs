@@ -179,13 +179,14 @@ public class ProviderFactoryTests
     }
 
     [Fact]
-    public void CreateProvider_WithNullConfiguration_ReturnsNull()
+    public void CreateProvider_WithNullConfiguration_ThrowsArgumentNullException()
     {
         // Act
-        var provider = _factory.CreateProvider(null!);
+        var action = () => _factory.CreateProvider(null as ModelConfiguration);
 
         // Assert
-        provider.Should().BeNull();
+        action.Should().Throw<ArgumentNullException>()
+            .WithParameterName("modelConfig");
     }
 
     #endregion

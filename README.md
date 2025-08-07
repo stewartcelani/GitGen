@@ -6,9 +6,9 @@
 
 #### AI-Powered Git Commit Message Generator
 
-
-
 A multi-model AI commit message generator that seamlessly integrates with your Git workflow. Configure multiple AI providers, switch between models instantly, and generate contextual commit messages that capture the essence of your changes.
+
+![gitgen.png](img/gitgen.png)
 
 ## Key Features
 
@@ -404,6 +404,22 @@ gitgen -p
 gitgen --preview @fast
 ```
 
+### PowerShell Users - Important Note
+
+PowerShell treats `@` as a special character for splatting. You must escape or quote the `@` symbol:
+
+```powershell
+# PowerShell - These will work:
+gitgen "@free"              # Use quotes
+gitgen '@smart'             # Single quotes also work
+gitgen `@fast               # Or use backtick to escape
+
+# PowerShell - This will NOT work:
+gitgen @free                # @ gets removed by PowerShell!
+```
+
+**Tip:** If gitgen seems to ignore your model selection, you're probably in PowerShell and need to quote the argument.
+
 ### App Settings Configuration
 
 Fine-tune GitGen behavior through the settings menu:
@@ -501,40 +517,15 @@ tests/GitGen.Tests/
 └── TestBase.cs        # Shared test utilities
 ```
 
-For development guidance, see [CLAUDE.md](CLAUDE.md) in the repository.
-
-## Security
-
-GitGen takes security seriously:
-
-### 🔒 Secure Configuration
+### Secure Configuration
 - API keys are encrypted using platform-specific data protection (DPAPI on Windows, Keychain on macOS, Kernel keyring on Linux)
 - Never stored in plain text or environment variables
 - Automatic cleanup of sensitive data from memory
 
-### 🛡️ Automated Security Scanning
-- **CodeQL Analysis**: Automated scanning for security vulnerabilities in every push
-- **Dependabot**: Monitors dependencies for known vulnerabilities and auto-creates update PRs
-- **OpenSSF Scorecard**: Comprehensive security scoring and best practices evaluation
-
-### 📋 Security Best Practices
-- No telemetry or data collection
-- All API communications use HTTPS
-- Regular security updates and dependency maintenance
-- Clear security warnings for free/public models
-
-### 🚨 Reporting Security Issues
-If you discover a security vulnerability, please report it via:
-- GitHub Security Advisories (preferred)
-- Email: security@[domain] (see SECURITY.md)
-
-For more details, see our [Security Policy](SECURITY.md).
 
 ## Support & Feedback
 
 - 🐛 [Report bugs or request features](https://github.com/stewartcelani/GitGen/issues)
-- 💬 [Start a discussion](https://github.com/stewartcelani/GitGen/discussions)
-- 📚 [View documentation](https://github.com/stewartcelani/GitGen/wiki)
 
 ## License
 

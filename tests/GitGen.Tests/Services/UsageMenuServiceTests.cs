@@ -195,8 +195,9 @@ public class UsageMenuServiceTests
     public async Task ViewTodayUsage_WithData_DisplaysSummary()
     {
         // Arrange
-        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('1'); // Select option 1 from main menu
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         var entries = CreateTestEntries(DateTime.Today, 5);
         
         _reportingServiceMock
@@ -216,8 +217,9 @@ public class UsageMenuServiceTests
     public async Task ViewTodayUsage_NoData_ShowsNoUsageMessage()
     {
         // Arrange
-        _consoleInput.AddLineInputs("1", "", "0");
+        _consoleInput.AddKeyInput('1'); // Select option 1 from main menu
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>(), DateTime.Today, DateTime.Today);
         
         // Act
@@ -235,8 +237,10 @@ public class UsageMenuServiceTests
     public async Task ViewCustomDateRange_DefaultDates_Uses30DayRange()
     {
         // Arrange
-        _consoleInput.AddLineInputs("6", "", "", "", "0");
+        _consoleInput.AddKeyInput('6'); // Select option 6 from main menu
+        _consoleInput.AddLineInputs("", ""); // Empty inputs for default dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -254,8 +258,10 @@ public class UsageMenuServiceTests
     public async Task ViewCustomDateRange_InvalidStartDate_PromptsAgain()
     {
         // Arrange
-        _consoleInput.AddLineInputs("6", "invalid", "2025-01-01", "2025-01-31", "", "0");
+        _consoleInput.AddKeyInput('6'); // Select option 6 from main menu
+        _consoleInput.AddLineInputs("invalid", "2025-01-01", "2025-01-31", ""); // Date inputs
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -269,8 +275,10 @@ public class UsageMenuServiceTests
     public async Task ViewCustomDateRange_EndDateBeforeStart_ShowsWarning()
     {
         // Arrange
-        _consoleInput.AddLineInputs("6", "2025-01-31", "2025-01-01", "2025-02-01", "", "0");
+        _consoleInput.AddKeyInput('6'); // Select option 6 from main menu
+        _consoleInput.AddLineInputs("2025-01-31", "2025-01-01", "2025-02-01", ""); // Date inputs
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -288,7 +296,9 @@ public class UsageMenuServiceTests
     public async Task ViewDetailedRequests_ShowsSubmenu()
     {
         // Arrange
-        _consoleInput.AddLineInputs("7", "0", "0");
+        _consoleInput.AddKeyInput('7'); // Select option 7 from main menu
+        _consoleInput.AddLineInput("0"); // Back from submenu
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -306,8 +316,10 @@ public class UsageMenuServiceTests
     public async Task ShowLast10Requests_WithData_DisplaysDetailedTable()
     {
         // Arrange
-        _consoleInput.AddLineInputs("7", "1", "", "0", "0");
+        _consoleInput.AddKeyInput('7'); // Select option 7 from main menu
+        _consoleInput.AddLineInput("1"); // Select option 1 from submenu
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         var entries = CreateTestEntries(DateTime.Today, 15);
         
         _reportingServiceMock
@@ -329,8 +341,9 @@ public class UsageMenuServiceTests
     public async Task ShowRequestsByModel_NoModels_ShowsMessage()
     {
         // Arrange
-        _consoleInput.AddLineInputs("7", "3", "", "0", "0");
-        _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput('7'); // Select option 7 from main menu
+        _consoleInput.AddLineInput("3"); // Select option 3 from submenu
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -344,8 +357,10 @@ public class UsageMenuServiceTests
     public async Task ShowRequestsByModel_WithModels_AllowsSelection()
     {
         // Arrange
-        _consoleInput.AddLineInputs("7", "3", "1", "", "0", "0");
+        _consoleInput.AddKeyInput('7'); // Select option 7 from main menu
+        _consoleInput.AddLineInputs("3", "1"); // Select option 3, then model 1
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         var entries = new[]
         {
             new UsageEntryBuilder().WithModel("gpt-4").Build(),
@@ -375,7 +390,9 @@ public class UsageMenuServiceTests
     public async Task ExportReports_ShowsFormatOptions()
     {
         // Arrange
-        _consoleInput.AddLineInputs("8", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInput("0"); // Back from export menu
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         SetupMockData(new List<UsageEntry>());
         
         // Act
@@ -395,8 +412,10 @@ public class UsageMenuServiceTests
         var tempFile = Path.GetTempFileName();
         File.Delete(tempFile); // Delete so the service can create it
         
-        _consoleInput.AddLineInputs("8", "1", "", "", "", "0", "0");
+        _consoleInput.AddKeyInput('8'); // Select option 8 from main menu
+        _consoleInput.AddLineInputs("1", "", ""); // Select JSON format, default dates
         _consoleInput.AddKeyInput('\r'); // For "Press any key to continue"
+        _consoleInput.AddKeyInput(ConsoleKey.Escape); // Exit main menu
         var entry = new UsageEntryBuilder().Build();
         
         _reportingServiceMock

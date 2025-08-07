@@ -18,7 +18,10 @@ public class UsageReportingService : IUsageReportingService
     {
         _logger = logger;
 
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        // Check environment variables first (for testing), then fall back to GetFolderPath
+        var homeDir = Environment.GetEnvironmentVariable("USERPROFILE") ?? 
+                      Environment.GetEnvironmentVariable("HOME") ??
+                      Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _usageDirectory = Path.Combine(homeDir, ".gitgen", "usage");
     }
 
