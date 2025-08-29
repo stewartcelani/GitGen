@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using GitGen.Configuration;
 using GitGen.Exceptions;
 using GitGen.Services;
 
@@ -25,22 +26,28 @@ public class OpenAIParameterDetector
 {
     private readonly string? _apiKey;
     private readonly string _baseUrl;
-    private readonly HttpClientService _httpClient;
+    private readonly IHttpClientService _httpClient;
     private readonly IConsoleLogger _logger;
     private readonly bool _requiresAuth;
+    private readonly ILlmCallTracker? _callTracker;
+    private readonly ModelConfiguration? _modelConfig;
 
     public OpenAIParameterDetector(
-        HttpClientService httpClient,
+        IHttpClientService httpClient,
         IConsoleLogger logger,
         string baseUrl,
         string? apiKey,
-        bool requiresAuth)
+        bool requiresAuth,
+        ILlmCallTracker? callTracker = null,
+        ModelConfiguration? modelConfig = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _baseUrl = baseUrl;
         _apiKey = apiKey;
         _requiresAuth = requiresAuth;
+        _callTracker = callTracker;
+        _modelConfig = modelConfig;
     }
 
     /// <summary>
@@ -53,6 +60,8 @@ public class OpenAIParameterDetector
     public async Task<ApiParameters> DetectParametersAsync(string model)
     {
         _logger.Debug("Starting API parameter detection for model: {Model}", model);
+        _logger.Debug("API URL: {Url}", _baseUrl);
+        _logger.Debug("Authentication required: {RequiresAuth}", _requiresAuth);
 
         if (!ValidationService.Model.IsValid(model))
             throw new ArgumentException(ValidationService.Model.GetValidationError(model), nameof(model));
@@ -62,9 +71,11 @@ public class OpenAIParameterDetector
         try
         {
             // Step 1: Detect token parameter style
+            _logger.Debug("Step 1: Detecting token parameter style...");
             parameters.UseLegacyMaxTokens = await DetectTokenParameterStyle(model);
 
             // Step 2: Detect temperature requirements
+            _logger.Debug("Step 2: Detecting temperature requirements...");
             parameters.Temperature = await DetectTemperatureRequirement(model, parameters.UseLegacyMaxTokens);
 
             _logger.Information($"{Constants.UI.CheckMark} Parameter detection complete.");
@@ -76,7 +87,7 @@ public class OpenAIParameterDetector
         }
         catch (Exception ex)
         {
-            _logger.Error(ex, Constants.ErrorMessages.ParameterDetectionFailed);
+            // Don't hide the error - it's already been logged with details in SendRequestAsync
             throw new InvalidOperationException(
                 string.Format(Constants.ErrorMessages.ConnectionTestFailed, "parameter"), ex);
         }
@@ -106,9 +117,10 @@ public class OpenAIParameterDetector
             _logger.Debug("Model requires legacy max_tokens parameter");
             return true;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.Error(ex, "Failed to detect token parameter style");
+            // For parameter detection, we expect some failures, so just re-throw
+            // The detailed error logging happens in SendRequestAsync
             throw;
         }
     }
@@ -161,9 +173,10 @@ public class OpenAIParameterDetector
                 throw;
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.Error(ex, "Failed to detect temperature requirements");
+            // For parameter detection, we expect some failures, so just re-throw
+            // The detailed error logging happens in SendRequestAsync
             throw;
         }
     }
@@ -175,11 +188,16 @@ public class OpenAIParameterDetector
     /// <returns>Test request object</returns>
     private OpenAIRequest CreateTestRequest(string model)
     {
-        return new OpenAIRequest
+        var request = new OpenAIRequest
         {
             Model = model,
             Messages = new[] { new Message { Role = "user", Content = Constants.Api.TestPrompt } }
         };
+
+        _logger.Debug("Created test request for model: {Model}", model);
+        _logger.Debug("Test prompt: {Prompt}", Constants.Api.TestPrompt);
+
+        return request;
     }
 
     /// <summary>
@@ -191,36 +209,145 @@ public class OpenAIParameterDetector
     private async Task<HttpResponseMessage> SendRequestAsync(OpenAIRequest request)
     {
         var jsonPayload = JsonSerializer.Serialize(request, OpenAIJsonContext.Default.OpenAIRequest);
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, _baseUrl)
+
+        _logger.Debug("Sending test request to: {Url}", _baseUrl);
+        _logger.Debug("Request payload: {Payload}", jsonPayload);
+
+        // Create Uri object first to ensure proper parsing
+        Uri requestUri;
+        try
         {
-            Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
-        };
+            // Trim any whitespace that might have been added
+            var trimmedUrl = _baseUrl?.Trim();
+            _logger.Debug("Trimmed URL: '{Url}'", trimmedUrl);
+
+            if (string.IsNullOrWhiteSpace(trimmedUrl))
+            {
+                throw new InvalidOperationException("URL is null or empty");
+            }
+
+            requestUri = new Uri(trimmedUrl, UriKind.Absolute);
+            _logger.Debug("Successfully created Uri object: {Uri}", requestUri.ToString());
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("");
+            _logger.Error($"❌ Failed to parse URL: {_baseUrl}");
+            _logger.Error($"   Error: {ex.Message}");
+            _logger.Error("   💡 Check that the URL is properly formatted (e.g., https://api.x.ai/v1/chat/completions)");
+            _logger.Error("");
+            throw new InvalidOperationException($"Invalid URL format: {ex.Message}", ex);
+        }
+
+        HttpRequestMessage httpRequest;
+        try
+        {
+            httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
+            {
+                Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+            };
+            _logger.Debug("Successfully created HttpRequestMessage");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("");
+            _logger.Error($"❌ Failed to create HTTP request: {ex.Message}");
+            _logger.Error($"   Uri: {requestUri}");
+            _logger.Error($"   Uri.ToString(): {requestUri.ToString()}");
+            _logger.Error($"   Uri.AbsoluteUri: {requestUri.AbsoluteUri}");
+            _logger.Error($"   Uri.IsAbsoluteUri: {requestUri.IsAbsoluteUri}");
+            _logger.Error("");
+            throw new InvalidOperationException($"Failed to create HTTP request: {ex.Message}", ex);
+        }
 
         // Add authentication if required
         if (_requiresAuth && !string.IsNullOrEmpty(_apiKey))
         {
-            if (_baseUrl.Contains(Constants.Api.AzureUrlPattern))
+            if (_baseUrl != null && _baseUrl.Contains(Constants.Api.AzureUrlPattern))
+            {
                 // Azure OpenAI uses api-key header
                 httpRequest.Headers.Add(Constants.Api.AzureApiKeyHeader, _apiKey);
+                _logger.Debug("Using Azure authentication header");
+            }
             else
+            {
                 // Standard OpenAI uses Bearer token
                 httpRequest.Headers.Authorization = new AuthenticationHeaderValue(Constants.Api.BearerPrefix, _apiKey);
+                _logger.Debug("Using Bearer token authentication");
+            }
         }
-
-        var response = await _httpClient.SendAsync(httpRequest);
-
-        if (!response.IsSuccessStatusCode)
+        else
         {
-            var error = await response.Content.ReadAsStringAsync();
-            _logger.Debug("API error during parameter detection: {StatusCode} - {Error}", response.StatusCode, error);
-
-            throw new HttpRequestException(
-                string.Format(Constants.ErrorMessages.ApiRequestFailed, response.StatusCode, error),
-                null,
-                response.StatusCode);
+            _logger.Debug("No authentication headers added (requiresAuth: {RequiresAuth}, hasApiKey: {HasApiKey})",
+                _requiresAuth, !string.IsNullOrEmpty(_apiKey));
         }
 
-        return response;
+        try
+        {
+            // Use HttpRequestOptions.ForConfigurationTesting to ensure errors are shown during configuration
+            var response = await _httpClient.SendAsync(httpRequest, GitGen.Services.HttpRequestOptions.ForConfigurationTesting);
+            return response;
+        }
+        catch (HttpResponseException ex)
+        {
+            // The error has already been logged by HttpClientService with ForConfigurationTesting
+            // Just re-throw as HttpRequestException for compatibility
+            throw new HttpRequestException(
+                ex.ResponseBody ?? ex.Message,
+                ex,
+                ex.StatusCode);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.Error("");
+            _logger.Error("❌ Request Timeout:");
+            _logger.Error($"   URL: {_baseUrl}");
+            _logger.Error("   💡 The request timed out - check if the URL is correct and accessible");
+            _logger.Error("");
+            throw new HttpRequestException("Request timed out", ex);
+        }
+        catch (HttpRequestException)
+        {
+            // Already a HttpRequestException, just re-throw
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // This is likely the "invalid request URI" error from HttpClient
+            _logger.Error("");
+            _logger.Error($"❌ Invalid URI Error: {ex.Message}");
+            _logger.Error($"   URL: '{_baseUrl}'");
+            _logger.Error($"   URL Length: {_baseUrl?.Length ?? 0}");
+
+            // Check for common issues
+            if (_baseUrl != null)
+            {
+                // Check for invisible characters
+                var hasInvisibleChars = _baseUrl.Any(c => char.IsControl(c) && c != '\r' && c != '\n');
+                if (hasInvisibleChars)
+                {
+                    _logger.Error("   ⚠️  URL contains invisible control characters");
+                }
+
+                // Show hex dump of first few characters to debug encoding issues
+                var firstChars = _baseUrl.Take(50).ToArray();
+                var hexDump = string.Join(" ", firstChars.Select(c => $"{(int)c:X2}"));
+                _logger.Debug("   Hex dump (first 50 chars): {HexDump}", hexDump);
+            }
+
+            _logger.Error("   💡 Try re-entering the URL or check for copy-paste issues");
+            _logger.Error("");
+            throw new HttpRequestException($"Invalid URI: {ex.Message}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("");
+            _logger.Error($"❌ Unexpected error: {ex.GetType().Name}");
+            _logger.Error($"   Message: {ex.Message}");
+            _logger.Error($"   URL: {_baseUrl}");
+            _logger.Error("");
+            throw new HttpRequestException($"Unexpected error: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
@@ -264,6 +391,11 @@ public class OpenAIParameterDetector
 
             _logger.Debug("API connection validated successfully");
             return true;
+        }
+        catch (HttpResponseException ex) when (ex.IsAuthenticationError)
+        {
+            _logger.Error("Authentication failed during connection validation");
+            throw new AuthenticationException(Constants.ErrorMessages.AuthenticationFailed, ex);
         }
         catch (HttpRequestException ex) when (IsAuthenticationError(ex))
         {

@@ -1,5 +1,7 @@
 using GitGen.Configuration;
 using GitGen.Providers;
+using GitGen.Exceptions;
+using System.Globalization;
 
 namespace GitGen.Services;
 
@@ -11,252 +13,47 @@ public class ConfigurationWizardService
 {
     private readonly ConfigurationService _configurationService;
     private readonly IConsoleLogger _logger;
-    private readonly IEnvironmentPersistenceService _persistenceService;
     private readonly ProviderFactory _providerFactory;
+    private readonly ISecureConfigurationService? _secureConfigService;
+    private readonly IConsoleInput _consoleInput;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="ConfigurationWizardService" /> class.
     /// </summary>
     /// <param name="logger">The console logger for user interaction and debugging.</param>
     /// <param name="providerFactory">The factory for creating AI provider instances.</param>
-    /// <param name="persistenceService">The service for persisting configuration to environment variables.</param>
     /// <param name="configurationService">The service for loading and validating configuration.</param>
     public ConfigurationWizardService(
         IConsoleLogger logger,
         ProviderFactory providerFactory,
-        IEnvironmentPersistenceService persistenceService,
-        ConfigurationService configurationService)
+        ConfigurationService configurationService,
+        IConsoleInput consoleInput,
+        ISecureConfigurationService? secureConfigService = null)
     {
         _logger = logger;
         _providerFactory = providerFactory;
-        _persistenceService = persistenceService;
         _configurationService = configurationService;
+        _consoleInput = consoleInput;
+        _secureConfigService = secureConfigService;
     }
 
     /// <summary>
     ///     Runs the interactive configuration wizard to set up or modify GitGen configuration.
     ///     Guides the user through provider selection, configuration, testing, and persistence.
     /// </summary>
-    /// <returns>The configured <see cref="GitGenConfiguration" /> if successful; otherwise, null if cancelled or failed.</returns>
-    public async Task<GitGenConfiguration?> RunWizardAsync()
+    /// <returns>The configured <see cref="ModelConfiguration" /> if successful; otherwise, null if cancelled or failed.</returns>
+    public virtual async Task<ModelConfiguration?> RunWizardAsync()
     {
-        _logger.Information($"{Constants.UI.InfoSymbol} {Constants.Messages.WelcomeToWizard}");
-        _logger.Information(Constants.Messages.WizardGuidance);
-
-        // Load existing configuration to use as defaults
-        var existingConfig = _configurationService.LoadConfiguration();
-        var hasExistingConfig = existingConfig.IsValid;
-
-        if (hasExistingConfig)
+        // Always use the new multi-model wizard
+        if (_secureConfigService == null)
         {
-            DisplayCurrentConfiguration(existingConfig);
-
-            // Ask if user wants to modify existing or start fresh
-            var modifyChoice = Prompt("Do you want to modify existing configuration (m) or start fresh (f)?", "m");
-            if (modifyChoice.ToLower() == "f")
-            {
-                existingConfig = new GitGenConfiguration();
-                hasExistingConfig = false;
-            }
-        }
-
-        var config = hasExistingConfig ? CloneConfiguration(existingConfig) : new GitGenConfiguration();
-
-        // Step 1: Select broad provider type (with existing value as default)
-        if (!SelectProviderType(config, existingConfig)) return null;
-
-        // Step 2: Select specific configuration based on provider type
-        if (!SelectProviderConfiguration(config, existingConfig)) return null;
-
-        // Step 3: Configure max output tokens
-        ConfigureMaxOutputTokens(config, existingConfig);
-
-        // Step 4: Test the configuration and detect API parameters
-        _logger.Information("");
-        _logger.Information("ℹ️ Testing your configuration and detecting optimal API parameters...");
-        try
-        {
-            var provider = _providerFactory.CreateProvider(config);
-            var (success, useLegacyTokens, detectedTemperature) =
-                await provider.TestConnectionAndDetectParametersAsync();
-
-            if (!success)
-            {
-                _logger.Error("❌ Configuration test failed with an unknown error.");
-                return null;
-            }
-
-            // Store the detected choices in the config object
-            config.OpenAiUseLegacyMaxTokens = useLegacyTokens;
-            config.Temperature = detectedTemperature;
-
-            _logger.Information(
-                $"ℹ️ Detected API parameter style: {(useLegacyTokens ? "Legacy (max_tokens)" : "Modern (max_completion_tokens)")}");
-            _logger.Information($"ℹ️ Model temperature: {detectedTemperature}");
-
-            // Now, perform a full test to show the user the response
-            _logger.Information("");
-            _logger.Information($"{Constants.UI.TestTubeSymbol} {Constants.Messages.TestingConnection}");
-
-            _logger.Information(
-                $"{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {config.BaseUrl} ({config.Model ?? Constants.Fallbacks.UnknownModelName})");
-
-            var testResult = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
-            var cleanedMessage = MessageCleaningService.CleanForDisplay(testResult.Message);
-
-            _logger.Information("");
-            _logger.Success($"{Constants.UI.CheckMark} LLM Response:");
-
-            _logger.Highlight($"{Constants.UI.CommitMessageQuotes}{cleanedMessage}{Constants.UI.CommitMessageQuotes}",
-                ConsoleColor.DarkCyan);
-            _logger.Information("");
-
-            if (testResult.InputTokens.HasValue && testResult.OutputTokens.HasValue)
-                _logger.Muted(
-                    $"Generated with {testResult.InputTokens:N0} input tokens, {testResult.OutputTokens:N0} output tokens ({testResult.TotalTokens:N0} total) • {cleanedMessage.Length} characters");
-            else
-                _logger.Muted($"Generated with {cleanedMessage.Length} characters");
-            _logger.Information("");
-            _logger.Success($"{Constants.UI.PartySymbol} Configuration test successful!");
-        }
-        catch (Exception ex)
-        {
-            _logger.Error("❌ Configuration test failed: {Message}", ex.Message);
-            _logger.Error(ex, "Failed to connect to provider during wizard setup.");
+            _logger.Error("Secure configuration service not available");
             return null;
         }
 
-        // Step 5: Show configuration summary before saving
-        DisplayConfigurationSummary(config, existingConfig);
-
-        var confirmSave = Prompt("Save this configuration?", "y");
-        if (confirmSave.ToLower() != "y")
-        {
-            _logger.Warning("Configuration not saved. Exiting wizard.");
-            return null;
-        }
-
-        // Step 6: Persist the configuration
-        _logger.Information("");
-        _logger.Information($"{Constants.UI.InfoSymbol} Saving configuration as user-level environment variables...");
-        _persistenceService.SaveConfiguration(config);
-        _logger.Information("");
-        _logger.Success($"{Constants.UI.CheckMark} {Constants.Messages.ConfigurationSaved}");
-        _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.Messages.RestartTerminalWarning}");
-
-        return config;
+        return await RunMultiModelWizardAsync();
     }
 
-    private bool SelectProviderType(GitGenConfiguration config, GitGenConfiguration existingConfig)
-    {
-        _logger.Information("");
-        _logger.Information("Step 1: Select your provider's API compatibility type.");
-        _logger.Information("  1. OpenAI Compatible (e.g., OpenAI, Azure, Groq, Ollama)");
-        // Add future providers like Anthropic here
-
-        // Determine default choice based on existing config
-        var defaultChoice = "1";
-        if (existingConfig.ProviderType == Constants.Configuration.ProviderTypeOpenAI)
-            defaultChoice = "1";
-
-        var choice = Prompt("Enter your choice:", defaultChoice);
-
-        switch (choice)
-        {
-            case "1":
-                config.ProviderType = Constants.Configuration.ProviderTypeOpenAI;
-                return true;
-            default:
-                _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.InvalidChoice}");
-                return false;
-        }
-    }
-
-    private bool SelectProviderConfiguration(GitGenConfiguration config, GitGenConfiguration existingConfig)
-    {
-        _logger.Information("");
-        _logger.Information("Step 2: Select your specific provider preset.");
-        _logger.Information("  1. OpenAI (Official Platform)");
-        _logger.Information(
-            "  2. Custom Provider (API Key required, e.g., Azure, Anthropic, Google, OpenRouter, Groq)");
-        _logger.Information("  3. Custom Provider (No API Key required, e.g., Ollama, LM Studio)");
-
-        // Determine default choice based on existing config
-        var defaultChoice = "1";
-        if (!string.IsNullOrEmpty(existingConfig.BaseUrl))
-        {
-            if (existingConfig.BaseUrl == Constants.Configuration.DefaultOpenAIBaseUrl)
-                defaultChoice = "1";
-            else if (existingConfig.RequiresAuth)
-                defaultChoice = "2";
-            else
-                defaultChoice = "3";
-        }
-
-        var choice = Prompt("Enter your choice:", defaultChoice);
-
-        switch (choice)
-        {
-            case "1": // OpenAI
-                config.BaseUrl = Constants.Configuration.DefaultOpenAIBaseUrl;
-                config.Model = Prompt("Enter your model name:",
-                    existingConfig.Model ?? Constants.Configuration.DefaultOpenAIModel);
-                config.ApiKey = PromptForApiKey("Enter your OpenAI API Key:", existingConfig.ApiKey);
-                config.RequiresAuth = true;
-                break;
-            case "2": // Custom with Auth (covers Azure, etc.)
-                config.BaseUrl = Prompt("Enter the provider's chat completions URL (e.g., your Azure endpoint):",
-                    existingConfig.BaseUrl);
-                config.Model = Prompt("Enter the model name (e.g., your Azure deployment name):", existingConfig.Model);
-                config.ApiKey = PromptForApiKey("Enter the provider's API Key:", existingConfig.ApiKey);
-                config.RequiresAuth = true;
-                break;
-            case "3": // Local/No Auth
-                config.BaseUrl = Prompt("Enter your custom provider's chat completions URL:",
-                    existingConfig.BaseUrl ?? Constants.Configuration.DefaultLocalBaseUrl);
-                config.Model = Prompt("Enter the model name (e.g., llama3):", existingConfig.Model);
-                config.RequiresAuth = false;
-                config.ApiKey = Constants.Fallbacks.NotRequiredValue;
-                break;
-            default:
-                _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.InvalidChoice}");
-                return false;
-        }
-
-        return true;
-    }
-
-    private void ConfigureMaxOutputTokens(GitGenConfiguration config, GitGenConfiguration existingConfig)
-    {
-        _logger.Information("");
-        _logger.Information("Step 3: Configure maximum output tokens.");
-        _logger.Information("This controls how many tokens the AI model can generate in responses.");
-
-        // Use existing value as default, or smart default based on model
-        var currentDefault = existingConfig.MaxOutputTokens > 0
-            ? existingConfig.MaxOutputTokens
-            : GetSuggestedMaxOutputTokens(config.Model);
-
-        var modelType = GetModelTypeDescription(config.Model);
-
-        _logger.Information($"ℹ️ Current/Suggested: {currentDefault} tokens{modelType}");
-        _logger.Information("ℹ️ Range: 100-8000 tokens. Higher values needed for reasoning models to avoid cut-off.");
-
-        while (true)
-        {
-            var input = Prompt("Enter max output tokens:", currentDefault.ToString());
-
-            if (int.TryParse(input, out var maxTokens) && ValidationService.TokenCount.IsValid(maxTokens))
-            {
-                config.MaxOutputTokens = maxTokens;
-                break;
-            }
-
-            _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.ErrorMessages.InvalidTokenRange}",
-                Constants.Configuration.MinOutputTokens,
-                Constants.Configuration.MaxOutputTokens);
-        }
-    }
 
     private int GetSuggestedMaxOutputTokens(string? modelName)
     {
@@ -300,40 +97,22 @@ public class ConfigurationWizardService
         while (true)
         {
             Console.Write(message);
-            if (!string.IsNullOrEmpty(defaultValue)) Console.Write($" [{defaultValue}]");
+            if (defaultValue != null)
+            {
+                var displayDefault = string.IsNullOrEmpty(defaultValue) ? "none" : defaultValue;
+                Console.Write($" [{displayDefault}]");
+            }
             Console.Write(" ");
+            Console.Out.Flush();
 
-            var input = secret ? ReadPassword() : Console.ReadLine();
+            var input = secret ? _consoleInput.ReadPassword() : _consoleInput.ReadLine();
             if (secret) Console.WriteLine();
 
             if (!string.IsNullOrWhiteSpace(input)) return input;
-            if (!string.IsNullOrWhiteSpace(defaultValue)) return defaultValue;
+            if (defaultValue != null) return defaultValue;
 
             _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.ErrorMessages.ValueCannotBeEmpty}");
         }
-    }
-
-    private static string ReadPassword()
-    {
-        var pass = string.Empty;
-        ConsoleKey key;
-        do
-        {
-            var keyInfo = Console.ReadKey(true);
-            key = keyInfo.Key;
-            if (key == ConsoleKey.Backspace && pass.Length > 0)
-            {
-                Console.Write("\b \b");
-                pass = pass[..^1];
-            }
-            else if (!char.IsControl(keyInfo.KeyChar))
-            {
-                Console.Write("*");
-                pass += keyInfo.KeyChar;
-            }
-        } while (key != ConsoleKey.Enter);
-
-        return pass;
     }
 
 
@@ -342,34 +121,69 @@ public class ConfigurationWizardService
     ///     Provides a quick way to change only the maximum output tokens setting without running the full wizard.
     /// </summary>
     /// <returns>True if the setting was successfully updated; otherwise, false.</returns>
-    public Task<bool> QuickChangeMaxTokens()
+    public async Task<bool> QuickChangeMaxTokens()
     {
-        var config = _configurationService.LoadConfiguration();
-        if (!config.IsValid)
+        if (_secureConfigService != null)
         {
-            _logger.Error("No valid configuration found. Please run 'gitgen configure' first.");
-            return Task.FromResult(false);
-        }
-
-        _logger.Information($"Current max output tokens: {config.MaxOutputTokens}");
-
-        while (true)
-        {
-            var input = Prompt("Enter new max output tokens:", config.MaxOutputTokens.ToString());
-
-            if (int.TryParse(input, out var maxTokens) && ValidationService.TokenCount.IsValid(maxTokens))
+            // Use new multi-model approach
+            var settings = await _secureConfigService.LoadSettingsAsync();
+            if (settings.Models.Count == 0)
             {
-                config.MaxOutputTokens = maxTokens;
-                _persistenceService.SaveConfiguration(config);
-                _logger.Success($"✅ Max output tokens updated to {maxTokens}");
-                _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.Messages.RestartTerminalWarning}");
-                return Task.FromResult(true);
+                _logger.Error("No models configured. Please run 'gitgen config' first.");
+                return false;
             }
 
-            _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.ErrorMessages.InvalidTokenRange}",
-                Constants.Configuration.MinOutputTokens,
-                Constants.Configuration.MaxOutputTokens);
+            ModelConfiguration model;
+            if (settings.Models.Count == 1)
+            {
+                model = settings.Models[0];
+            }
+            else
+            {
+                // Let user select which model to update
+                _logger.Information("Select model to update:");
+                for (int i = 0; i < settings.Models.Count; i++)
+                {
+                    var m = settings.Models[i];
+                    var defaultMarker = m.Id == settings.DefaultModelId ? " ⭐" : "";
+                    _logger.Information($"  {i + 1}. {m.Name}{defaultMarker}");
+                }
+
+                while (true)
+                {
+                    var choice = Prompt($"Enter choice (1-{settings.Models.Count}):", "1");
+                    if (int.TryParse(choice, out var idx) && idx > 0 && idx <= settings.Models.Count)
+                    {
+                        model = settings.Models[idx - 1];
+                        break;
+                    }
+                    _logger.Warning("Invalid choice. Please try again.");
+                }
+            }
+
+            _logger.Information($"Current max output tokens for '{model.Name}': {model.MaxOutputTokens}");
+
+            while (true)
+            {
+                var input = Prompt("Enter new max output tokens:", model.MaxOutputTokens.ToString());
+
+                if (int.TryParse(input, out var maxTokens) && ValidationService.TokenCount.IsValid(maxTokens))
+                {
+                    model.MaxOutputTokens = maxTokens;
+                    await _secureConfigService.UpdateModelAsync(model);
+                    _logger.Success($"✅ Max output tokens for '{model.Name}' updated to {maxTokens}");
+                    return true;
+                }
+
+                _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.ErrorMessages.InvalidTokenRange}",
+                    Constants.Configuration.MinOutputTokens,
+                    Constants.Configuration.MaxOutputTokens);
+            }
         }
+
+        // No legacy support
+        _logger.Error("Secure configuration service not available.");
+        return false;
     }
 
     /// <summary>
@@ -379,158 +193,92 @@ public class ConfigurationWizardService
     /// <returns>True if the model was successfully changed; otherwise, false.</returns>
     public async Task<bool> QuickChangeModel()
     {
-        var config = _configurationService.LoadConfiguration();
-        if (!config.IsValid)
+        if (_secureConfigService != null)
         {
-            _logger.Error("No valid configuration found. Please run 'gitgen configure' first.");
-            return false;
-        }
-
-        _logger.Information($"Current model: {config.Model}");
-        var newModel = Prompt("Enter new model name:", config.Model);
-
-        if (newModel == config.Model)
-        {
-            _logger.Information("Model unchanged.");
-            return true;
-        }
-
-        // Test the new model
-        config.Model = newModel;
-        _logger.Information("Testing new model configuration...");
-
-        try
-        {
-            var provider = _providerFactory.CreateProvider(config);
-            var (success, useLegacyTokens, detectedTemperature) =
-                await provider.TestConnectionAndDetectParametersAsync();
-
-            if (!success)
+            // Use new multi-model approach
+            var settings = await _secureConfigService.LoadSettingsAsync();
+            if (settings.Models.Count == 0)
             {
-                _logger.Error($"Failed to connect with model '{newModel}'");
+                _logger.Error("No models configured. Please run 'gitgen config' first.");
                 return false;
             }
 
-            config.OpenAiUseLegacyMaxTokens = useLegacyTokens;
-            config.Temperature = detectedTemperature;
-
-            _persistenceService.SaveConfiguration(config);
-            _logger.Success($"✅ Model updated to {newModel}");
-            _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.Messages.RestartTerminalWarning}");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.Error($"Failed to test new model: {ex.Message}");
-            return false;
-        }
-    }
-
-    /// <summary>
-    ///     Changes the AI model to the specified model name while preserving other configuration settings.
-    ///     Performs automatic parameter detection and testing before applying changes.
-    /// </summary>
-    /// <param name="newModelName">The name of the new model to switch to.</param>
-    /// <returns>True if the model was successfully changed; otherwise, false.</returns>
-    public async Task<bool> ChangeModelAsync(string newModelName)
-    {
-        var currentConfig = _configurationService.LoadConfiguration();
-        if (!currentConfig.IsValid)
-        {
-            _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.ConfigurationInvalid}");
-            return false;
-        }
-
-        try
-        {
-            _logger.Information($"🔄 Changing model from '{currentConfig.Model}' to '{newModelName}'...");
-            _logger.Information(
-                $"ℹ️ Keeping provider: {currentConfig.ProviderType}, Base URL: {currentConfig.BaseUrl}");
-            Console.WriteLine();
-
-            // Create a new configuration with the new model but same provider settings
-            var newConfig = new GitGenConfiguration
+            ModelConfiguration model;
+            if (settings.Models.Count == 1)
             {
-                ProviderType = currentConfig.ProviderType,
-                BaseUrl = currentConfig.BaseUrl,
-                ApiKey = currentConfig.ApiKey,
-                RequiresAuth = currentConfig.RequiresAuth,
-                Model = newModelName,
-                // These will be rediscovered during testing
-                OpenAiUseLegacyMaxTokens = currentConfig.OpenAiUseLegacyMaxTokens,
-                Temperature = currentConfig.Temperature
-            };
-
-            // Test the new configuration and detect parameters
-            _logger.Information("🧪 Testing new model configuration and detecting optimal parameters...");
-            var provider = _providerFactory.CreateProvider(newConfig);
-
-            var (success, useLegacyTokens, detectedTemperature) =
-                await provider.TestConnectionAndDetectParametersAsync();
-
-            if (!success)
+                model = settings.Models[0];
+            }
+            else
             {
-                _logger.Error($"❌ Failed to connect to model '{newModelName}'. Model change cancelled.");
-                return false;
+                // Let user select which model to update
+                _logger.Information("Select model to update:");
+                for (int i = 0; i < settings.Models.Count; i++)
+                {
+                    var m = settings.Models[i];
+                    var defaultMarker = m.Id == settings.DefaultModelId ? " ⭐" : "";
+                    _logger.Information($"  {i + 1}. {m.Name}{defaultMarker}");
+                }
+
+                while (true)
+                {
+                    var choice = Prompt($"Enter choice (1-{settings.Models.Count}):", "1");
+                    if (int.TryParse(choice, out var idx) && idx > 0 && idx <= settings.Models.Count)
+                    {
+                        model = settings.Models[idx - 1];
+                        break;
+                    }
+                    _logger.Warning("Invalid choice. Please try again.");
+                }
             }
 
-            // Update the configuration with detected parameters
-            newConfig.OpenAiUseLegacyMaxTokens = useLegacyTokens;
-            newConfig.Temperature = detectedTemperature;
+            _logger.Information($"Current model ID for '{model.Name}': {model.ModelId}");
+            var newModelId = Prompt("Enter new model ID:", model.ModelId);
 
-            _logger.Success("✅ Model test successful!");
-            _logger.Information(
-                $"ℹ️ Detected API parameter style: {(useLegacyTokens ? "Legacy (max_tokens)" : "Modern (max_completion_tokens)")}");
-            _logger.Information($"ℹ️ Model temperature: {detectedTemperature}");
-            Console.WriteLine();
+            if (newModelId == model.ModelId)
+            {
+                _logger.Information("Model ID unchanged.");
+                return true;
+            }
 
-            // Persist only the model-related changes
-            _logger.Information("💾 Saving model configuration changes...");
-            _persistenceService.UpdateModelConfiguration(newModelName, useLegacyTokens, detectedTemperature);
+            // Test the new model
+            var oldModelId = model.ModelId;
+            model.ModelId = newModelId;
+            _logger.Information("Testing new model configuration...");
 
-            _logger.Success("✅ Model configuration updated successfully!");
-            _logger.Information($"🎯 Now using model: {newModelName}");
-            _logger.Warning("⚠️ You may need to restart your terminal for the changes to take effect.");
+            try
+            {
+                var provider = _providerFactory.CreateProvider(model);
+                var (success, useLegacyTokens, detectedTemperature) =
+                    await provider.TestConnectionAndDetectParametersAsync();
 
-            return true;
+                if (!success)
+                {
+                    _logger.Error($"Failed to connect with model '{newModelId}'");
+                    model.ModelId = oldModelId; // Restore old model ID
+                    return false;
+                }
+
+                model.UseLegacyMaxTokens = useLegacyTokens;
+                model.Temperature = detectedTemperature;
+
+                await _secureConfigService.UpdateModelAsync(model);
+                _logger.Success($"✅ Model ID for '{model.Name}' updated to {newModelId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to test new model: {ex.Message}");
+                model.ModelId = oldModelId; // Restore old model ID
+                return false;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Failed to change model configuration");
-            _logger.Error($"❌ Model change failed: {ex.Message}");
-            return false;
-        }
+
+        // No legacy support
+        _logger.Error("Secure configuration service not available.");
+        return false;
     }
 
-    private void DisplayCurrentConfiguration(GitGenConfiguration config)
-    {
-        _logger.Information("");
-        _logger.Information("📋 Current Configuration:");
-        _logger.Information($"   Provider: {config.ProviderType}");
-        _logger.Information($"   Base URL: {config.BaseUrl}");
-        _logger.Information($"   Model: {config.Model}");
-        _logger.Information($"   API Key: {ValidationService.ApiKey.Mask(config.ApiKey)}");
-        _logger.Information($"   Max Tokens: {config.MaxOutputTokens}");
-        _logger.Information("");
-    }
 
-    private void DisplayConfigurationSummary(GitGenConfiguration newConfig, GitGenConfiguration oldConfig)
-    {
-        _logger.Information("");
-        _logger.Information("📋 Configuration Summary:");
-
-        DisplayConfigChange("Provider", oldConfig.ProviderType, newConfig.ProviderType);
-        DisplayConfigChange("Base URL", oldConfig.BaseUrl, newConfig.BaseUrl);
-        DisplayConfigChange("Model", oldConfig.Model, newConfig.Model);
-        DisplayConfigChange("API Key",
-            ValidationService.ApiKey.Mask(oldConfig.ApiKey),
-            ValidationService.ApiKey.Mask(newConfig.ApiKey));
-        DisplayConfigChange("Max Tokens",
-            oldConfig.MaxOutputTokens.ToString(),
-            newConfig.MaxOutputTokens.ToString());
-
-        _logger.Information("");
-    }
 
     private void DisplayConfigChange(string field, string? oldValue, string? newValue)
     {
@@ -540,29 +288,628 @@ public class ConfigurationWizardService
             _logger.Information($"   {field}: {newValue ?? "(not set)"}");
     }
 
-    private GitGenConfiguration CloneConfiguration(GitGenConfiguration source)
+
+    /// <summary>
+    ///     Runs the new multi-model configuration wizard.
+    /// </summary>
+    public async Task<ModelConfiguration?> RunMultiModelWizardAsync()
     {
-        return new GitGenConfiguration
+        _logger.Information($"{Constants.UI.PartySymbol} Welcome to the GitGen Multi-Model Configuration Wizard");
+        _logger.Information("This will guide you through setting up a new AI model configuration.");
+
+        var model = new ModelConfiguration();
+
+        // Step 1: Model Name
+        if (!await ConfigureModelName(model)) return null;
+
+        // Step 2: Model Aliases
+        if (!await ConfigureModelAliases(model)) return null;
+
+        // Step 3: Note/Description
+        await ConfigureModelNote(model);
+
+        // Step 4: Select provider type
+        if (!SelectProviderType(model)) return null;
+
+        // Step 5: Select specific configuration
+        if (!SelectProviderConfiguration(model)) return null;
+
+        // Step 6: Configure max output tokens
+        ConfigureMaxOutputTokens(model);
+
+        // Step 7: Test the configuration
+        if (!await TestModelConfiguration(model)) return null;
+
+        // Step 8: Pricing configuration
+        await ConfigurePricing(model);
+
+        // Step 9: System prompt
+        await ConfigureSystemPrompt(model);
+
+        // Step 10: Show summary and save
+        DisplayModelSummary(model);
+
+        var confirmSave = Prompt("Save this model configuration?", "y");
+        if (confirmSave.ToLower() != "y")
         {
-            ProviderType = source.ProviderType,
-            BaseUrl = source.BaseUrl,
-            Model = source.Model,
-            ApiKey = source.ApiKey,
-            RequiresAuth = source.RequiresAuth,
-            OpenAiUseLegacyMaxTokens = source.OpenAiUseLegacyMaxTokens,
-            Temperature = source.Temperature,
-            MaxOutputTokens = source.MaxOutputTokens
-        };
+            _logger.Warning("Model configuration not saved. Exiting wizard.");
+            return null;
+        }
+
+        // Check if this will be the first (and thus default) model
+        var settings = await _secureConfigService!.LoadSettingsAsync();
+        bool isFirstModel = settings.Models.Count == 0;
+
+        // Save the model
+        await _secureConfigService!.AddModelAsync(model);
+        _logger.Success($"{Constants.UI.CheckMark} Model '{model.Name}' saved successfully!");
+
+        // Warn if this is the first model and appears to be for public/free use
+        if (isFirstModel && AppearsToBePublicModel(model))
+        {
+            _logger.Information("");
+            _logger.Warning($"{Constants.UI.WarningSymbol} Important: This model has been set as your default because it's your first model.");
+            _logger.Warning("   Since it appears to be configured for public/free use, running 'gitgen' without");
+            _logger.Warning("   specifying a model will send your code to this service.");
+            _logger.Information("");
+            _logger.Information("   Consider adding a secure model and setting it as default for private repositories.");
+            _logger.Information("   You can change the default model anytime using 'gitgen config'.");
+        }
+
+        return model;
+    }
+
+    private async Task<bool> ConfigureModelName(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 1: Choose a name for this model configuration.", ConsoleColor.Cyan);
+        _logger.Information("This is a friendly name to identify this configuration, NOT the model ID the provider uses.");
+        _logger.Information("You'll configure the actual model ID (e.g., 'gpt-4.1-nano', 'claude-4-sonnet') in a later step.");
+        _logger.Muted("Examples: 'gpt-4-work', 'sonnet', 'kimik2', 'llama-local'");
+
+        while (true)
+        {
+            var name = Prompt("Enter model name:");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                _logger.Warning("Model name cannot be empty.");
+                continue;
+            }
+
+            // Check if name already exists
+            var existing = await _secureConfigService!.GetModelAsync(name);
+            if (existing != null)
+            {
+                _logger.Warning($"A model named '{name}' already exists. Please choose a different name.");
+                continue;
+            }
+
+            model.Name = name;
+            return true;
+        }
+    }
+
+    private async Task<bool> ConfigureModelAliases(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 2: Configure aliases for quick access (optional).", ConsoleColor.Green);
+        _logger.Information("Aliases allow you to quickly reference models with memorable shortcuts.");
+        _logger.Information("");
+        _logger.Information("Examples:");
+        _logger.Success("  @ultrathink - For complex reasoning tasks");
+        _logger.Success("  @sonnet    - For general coding tasks");
+        _logger.Success("  @free      - For public repos where privacy isn't an issue");
+        _logger.Muted("");
+        _logger.Muted("💡 Tip: Configure a free model as @free to save money on public repositories");
+        _logger.Muted("   where sending code to free APIs doesn't matter.");
+        _logger.Muted("   OpenRouter often has great free models in public previews!");
+        _logger.Warning("");
+        _logger.Warning("⚠️  Important: Avoid setting a free model as your default to prevent accidentally");
+        _logger.Warning("   sending private code to public APIs. Always use explicit model selection");
+        _logger.Warning("   (e.g., 'gitgen @free') when working with public repositories.");
+        _logger.Information("");
+
+        // Suggest a dash-stripped alias if the model name contains dashes
+        var suggestedAlias = model.Name.Contains('-')
+            ? model.Name.Replace("-", "").ToLower()
+            : string.Empty;
+
+        var aliasInput = suggestedAlias != string.Empty
+            ? Prompt($"Enter aliases (comma-separated) [{suggestedAlias}]:", suggestedAlias)
+            : Prompt("Enter aliases (comma-separated) [none]:", "");
+
+        if (string.IsNullOrWhiteSpace(aliasInput))
+        {
+            // If there's a suggested alias, use it; otherwise, leave aliases empty
+            if (!string.IsNullOrEmpty(suggestedAlias))
+            {
+                model.Aliases = new List<string> { suggestedAlias };
+            }
+            else
+            {
+                model.Aliases = new List<string>();
+            }
+            return true;
+        }
+
+        // Parse and validate aliases
+        var aliases = aliasInput.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(a => a.Trim())
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .ToList();
+
+        var validatedAliases = new List<string>();
+        var settings = await _secureConfigService!.LoadSettingsAsync();
+
+        foreach (var alias in aliases)
+        {
+            // Normalize alias - remove @ if present, we'll add it back
+            var normalizedAlias = alias.TrimStart('@');
+
+            // Check if it conflicts with existing model names
+            var existingModel = settings.Models.FirstOrDefault(m =>
+                m.Name.Equals(normalizedAlias, StringComparison.OrdinalIgnoreCase));
+            if (existingModel != null)
+            {
+                _logger.Warning($"Alias '@{normalizedAlias}' conflicts with existing model name '{existingModel.Name}'. Skipping.");
+                continue;
+            }
+
+            // Check if alias already exists in any model
+            var conflictingModel = settings.Models.FirstOrDefault(m =>
+                m.Aliases != null && m.Aliases.Any(a =>
+                    a.Equals(normalizedAlias, StringComparison.OrdinalIgnoreCase)));
+            if (conflictingModel != null)
+            {
+                _logger.Warning($"Alias '@{normalizedAlias}' is already used by model '{conflictingModel.Name}'. Skipping.");
+                continue;
+            }
+
+            validatedAliases.Add(normalizedAlias);
+        }
+
+        // Set the validated aliases (can be empty)
+        model.Aliases = validatedAliases;
+
+        if (validatedAliases.Count > 0)
+        {
+            _logger.Success($"✅ Configured aliases: {string.Join(", ", validatedAliases.Select(a => $"@{a}"))}");
+        }
+        else
+        {
+            _logger.Information("ℹ️ No aliases configured for this model.");
+        }
+
+        return true;
+    }
+
+    private async Task ConfigureModelNote(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 3: Add a description for this model (optional).", ConsoleColor.Yellow);
+        _logger.Muted("This helps you remember what this model is best used for.");
+
+        var note = Prompt("Enter description [none]:", "");
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            model.Note = note;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private bool SelectProviderType(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 4: Select your provider's API compatibility type.", ConsoleColor.Magenta);
+        _logger.Information("  1. OpenAI Compatible (e.g., OpenAI, Azure, Groq, Ollama)");
+
+        var choice = Prompt("Enter your choice:", "1");
+
+        switch (choice)
+        {
+            case "1":
+                model.Type = Constants.Configuration.ProviderTypeOpenAICompatible;
+                return true;
+            default:
+                _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.InvalidChoice}");
+                return false;
+        }
+    }
+
+    private bool SelectProviderConfiguration(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 5: Select your specific provider preset.", ConsoleColor.Cyan);
+        _logger.Information("  1. OpenAI (Official Platform)");
+        _logger.Information("  2. Custom Provider (API Key required, e.g., Azure, Anthropic, Google, OpenRouter, Groq)");
+        _logger.Information("  3. Custom Provider (No API Key required, e.g., Ollama, LM Studio)");
+
+        var choice = Prompt("Enter your choice:", "1");
+
+        switch (choice)
+        {
+            case "1": // OpenAI
+                model.Url = Constants.Configuration.DefaultOpenAIBaseUrl;
+
+                // Check if URL matches a known provider
+                var openAIProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
+                if (!string.IsNullOrEmpty(openAIProvider))
+                {
+                    model.Provider = openAIProvider;
+                    _logger.Success($"✅ Detected provider: {openAIProvider}");
+                }
+                else
+                {
+                    // Fallback to domain extraction if auto-detection fails
+                    var openaiDomain = ValidationService.DomainExtractor.ExtractDomain(model.Url) ?? "openai.com";
+                    model.Provider = Prompt($"Provider name [{openaiDomain}]:", openaiDomain);
+                }
+                model.ModelId = Prompt("Enter the model ID used by the provider's API (e.g., gpt-4-turbo):", Constants.Configuration.DefaultOpenAIModel);
+                model.ApiKey = PromptForApiKey("Enter your OpenAI API Key:", null);
+                model.RequiresAuth = true;
+                break;
+            case "2": // Custom with Auth
+                model.Url = Prompt("Enter the provider's chat completions URL:");
+
+                // Check if URL matches a known provider
+                var knownProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
+
+                if (!string.IsNullOrEmpty(knownProvider))
+                {
+                    model.Provider = knownProvider;
+                    _logger.Success($"✅ Detected provider: {knownProvider}");
+                }
+                else
+                {
+                    // Extract and suggest domain as provider name for unknown providers
+                    var customDomain = ValidationService.DomainExtractor.ExtractDomain(model.Url) ?? "custom";
+                    model.Provider = Prompt($"Provider name [{customDomain}]:", customDomain);
+                }
+
+                model.ModelId = Prompt("Enter the model ID used by the provider's API:");
+                model.ApiKey = PromptForApiKey("Enter the provider's API Key:", null);
+                model.RequiresAuth = true;
+                break;
+            case "3": // Local/No Auth
+                model.Url = Prompt("Enter your custom provider's chat completions URL:", Constants.Configuration.DefaultLocalBaseUrl);
+
+                // Check if URL matches a known provider
+                var knownLocalProvider = ValidationService.DomainExtractor.GetProviderNameFromUrl(model.Url);
+                if (!string.IsNullOrEmpty(knownLocalProvider))
+                {
+                    model.Provider = knownLocalProvider;
+                    _logger.Success($"✅ Detected provider: {knownLocalProvider}");
+                }
+                else
+                {
+                    // Extract and suggest domain as provider name for unknown providers
+                    var localDomain = ValidationService.DomainExtractor.ExtractDomain(model.Url) ?? "localhost";
+                    model.Provider = Prompt($"Provider name [{localDomain}]:", localDomain);
+                }
+
+                model.ModelId = Prompt("Enter the model ID used by the provider's API (e.g., llama3):");
+                model.RequiresAuth = false;
+                model.ApiKey = Constants.Fallbacks.NotRequiredValue;
+                break;
+            default:
+                _logger.Error($"{Constants.UI.CrossMark} {Constants.ErrorMessages.InvalidChoice}");
+                return false;
+        }
+
+        return true;
+    }
+
+    private void ConfigureMaxOutputTokens(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 6: Configure maximum output tokens.", ConsoleColor.Green);
+        _logger.Information("This controls how many tokens the AI model can generate in responses.");
+
+        var suggestedTokens = GetSuggestedMaxOutputTokens(model.ModelId);
+        var modelType = GetModelTypeDescription(model.ModelId);
+
+        _logger.Information($"ℹ️ Suggested: {suggestedTokens} tokens{modelType}");
+        _logger.Information("ℹ️ Range: 100-8000 tokens. Higher values needed for reasoning models to avoid cut-off.");
+
+        while (true)
+        {
+            var input = Prompt("Enter max output tokens:", suggestedTokens.ToString());
+
+            if (int.TryParse(input, out var maxTokens) && ValidationService.TokenCount.IsValid(maxTokens))
+            {
+                model.MaxOutputTokens = maxTokens;
+                break;
+            }
+
+            _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.ErrorMessages.InvalidTokenRange}",
+                Constants.Configuration.MinOutputTokens,
+                Constants.Configuration.MaxOutputTokens);
+        }
+    }
+
+    private async Task<bool> TestModelConfiguration(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 7: Test the configuration.", ConsoleColor.Yellow);
+        _logger.Information("Testing your configuration and detecting optimal API parameters...");
+
+        const int maxAttempts = 3;
+        int attempt = 0;
+
+        while (attempt < maxAttempts)
+        {
+            attempt++;
+
+            try
+            {
+                var provider = _providerFactory.CreateProvider(model);
+                var (success, useLegacyTokens, detectedTemperature) = await provider.TestConnectionAndDetectParametersAsync();
+
+                if (!success)
+                {
+                    // Error details have already been shown by parameter detector
+
+                    if (attempt < maxAttempts)
+                    {
+                        var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
+                        if (retry.ToLower() == "y")
+                        {
+                            _logger.Information("Retrying configuration test...");
+                            continue;
+                        }
+                    }
+
+                    return false;
+                }
+
+                // Store the detected parameters
+                model.UseLegacyMaxTokens = useLegacyTokens;
+                model.Temperature = detectedTemperature;
+
+                // Perform a full test
+                _logger.Information("");
+                _logger.Information($"{Constants.UI.TestTubeSymbol} Testing LLM connection...");
+                _logger.Information($"{Constants.UI.LinkSymbol} Using {provider.ProviderName} provider via {model.Url} ({model.ModelId})");
+
+                var testResult = await provider.GenerateAsync(Constants.Api.TestLlmPrompt);
+                var cleanedMessage = MessageCleaningService.CleanForDisplay(testResult.Message);
+
+                _logger.Information("");
+                _logger.Success($"{Constants.UI.CheckMark} LLM Response:");
+                _logger.Highlight($"{Constants.UI.CommitMessageQuotes}{cleanedMessage}{Constants.UI.CommitMessageQuotes}", ConsoleColor.DarkCyan);
+                _logger.Information("");
+
+                if (testResult.InputTokens.HasValue && testResult.OutputTokens.HasValue)
+                    _logger.Muted($"Generated with {testResult.InputTokens:N0} input tokens, {testResult.OutputTokens:N0} output tokens ({testResult.TotalTokens:N0} total) • {cleanedMessage.Length} characters");
+                else
+                    _logger.Muted($"Generated with {cleanedMessage.Length} characters");
+
+                _logger.Information("");
+                _logger.Success($"{Constants.UI.PartySymbol} Configuration test successful!");
+                return true;
+            }
+            catch (HttpResponseException httpEx) when (httpEx.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                _logger.Warning("⚠️  Rate limited by the API provider. This is common with free models.");
+
+                if (attempt < maxAttempts)
+                {
+                    _logger.Information("The API's built-in retry mechanism will handle rate limiting automatically.");
+                    var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
+                    if (retry.ToLower() == "y")
+                    {
+                        _logger.Information("Waiting a moment before retrying...");
+                        await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                        continue;
+                    }
+                }
+
+                // Rate limiting error already shown
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // For unexpected errors not handled by parameter detector, show the error
+                if (!(ex.InnerException is HttpRequestException))
+                {
+                    _logger.Error($"❌ Unexpected error: {ex.Message}");
+                }
+                // Otherwise, error was already shown by parameter detector
+
+                if (attempt < maxAttempts)
+                {
+                    var retry = Prompt($"Would you like to retry? (attempt {attempt}/{maxAttempts}) (y/n)", "y");
+                    if (retry.ToLower() == "y")
+                    {
+                        continue;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        // All retries exhausted
+        return false;
+    }
+
+    private async Task ConfigurePricing(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 8: Configure pricing information.", ConsoleColor.Magenta);
+        _logger.Information("Enter costs per million tokens.");
+
+        // Pricing is already initialized in ModelConfiguration constructor
+
+        // Currency
+        _logger.Information("");
+        _logger.Information("Select currency:");
+        _logger.Information("  1. USD ($)");
+        _logger.Information("  2. EUR (€)");
+        _logger.Information("  3. GBP (£)");
+        _logger.Information("  4. AUD (A$)");
+        _logger.Information("  5. Other");
+
+        var currencyChoice = Prompt("Enter your choice:", "1");
+        switch (currencyChoice)
+        {
+            case "1": model.Pricing.CurrencyCode = "USD"; break;
+            case "2": model.Pricing.CurrencyCode = "EUR"; break;
+            case "3": model.Pricing.CurrencyCode = "GBP"; break;
+            case "4": model.Pricing.CurrencyCode = "AUD"; break;
+            case "5":
+                model.Pricing.CurrencyCode = Prompt("Enter currency code (e.g., JPY):").ToUpper();
+                break;
+            default: model.Pricing.CurrencyCode = "USD"; break;
+        }
+
+        // Input cost
+        while (true)
+        {
+            var inputCostStr = Prompt("Input cost per million tokens:");
+            if (decimal.TryParse(inputCostStr, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var inputCost) && inputCost >= 0)
+            {
+                model.Pricing.InputPer1M = inputCost;
+                break;
+            }
+            _logger.Warning("Please enter a valid positive number.");
+        }
+
+        // Output cost
+        while (true)
+        {
+            var outputCostStr = Prompt("Output cost per million tokens:");
+            if (decimal.TryParse(outputCostStr, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var outputCost) && outputCost >= 0)
+            {
+                model.Pricing.OutputPer1M = outputCost;
+                break;
+            }
+            _logger.Warning("Please enter a valid positive number.");
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private async Task ConfigureSystemPrompt(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 9: Configure custom system prompt (optional).", ConsoleColor.Cyan);
+        _logger.Information("This will be appended to GitGen's base instructions for this model.");
+        _logger.Muted("Example: 'Always use conventional commit format' or 'Must start with a Haiku' or 'Focus on architectural changes'");
+
+        var systemPrompt = Prompt("Enter custom system prompt:", "");
+        if (!string.IsNullOrWhiteSpace(systemPrompt))
+        {
+            model.SystemPrompt = systemPrompt;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private void DisplayModelSummary(ModelConfiguration model)
+    {
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Information("");
+        _logger.Highlight("Step 10: Review configuration summary.", ConsoleColor.Green);
+        _logger.Information("");
+        _logger.Information("📋 Model Configuration Summary:");
+        _logger.Information($"   Name: {model.Name}");
+
+        // Display aliases
+        if (model.Aliases != null && model.Aliases.Count > 0)
+            _logger.Information($"   Aliases: {string.Join(", ", model.Aliases)}");
+
+        // Display note/description
+        if (!string.IsNullOrWhiteSpace(model.Note))
+            _logger.Information($"   Description: {model.Note}");
+
+        _logger.Information($"   Type: {model.Type}");
+        _logger.Information($"   Provider: {model.Provider}");
+        _logger.Information($"   URL: {model.Url}");
+        _logger.Information($"   Model ID: {model.ModelId}");
+        _logger.Information($"   API Key: {ValidationService.ApiKey.Mask(model.ApiKey)}");
+        _logger.Information($"   Max Tokens: {model.MaxOutputTokens}");
+
+        // Display pricing with currency symbol
+        var pricingInfo = CostCalculationService.FormatPricingInfo(model.Pricing);
+        _logger.Information($"   Pricing: {pricingInfo}");
+        _logger.Information($"   Currency: {model.Pricing.CurrencyCode} ({CostCalculationService.GetCurrencySymbol(model.Pricing.CurrencyCode)})");
+
+        // Display system prompt
+        if (!string.IsNullOrWhiteSpace(model.SystemPrompt))
+        {
+            var truncatedPrompt = model.SystemPrompt.Length > 50
+                ? model.SystemPrompt.Substring(0, 50) + "..."
+                : model.SystemPrompt;
+            _logger.Information($"   System Prompt: {truncatedPrompt}");
+        }
+        else
+        {
+            _logger.Information($"   System Prompt: (default)");
+        }
+
+        _logger.Information("");
     }
 
     /// <summary>
-    ///     Resets all GitGen configuration by clearing environment variables and shell profile entries.
+    ///     Checks if a model appears to be configured for public/free use based on its aliases and description.
     /// </summary>
-    public void ResetConfiguration()
+    private bool AppearsToBePublicModel(ModelConfiguration model)
     {
-        _logger.Information($"{Constants.UI.InfoSymbol} {Constants.Messages.ResettingConfiguration}");
-        _persistenceService.ClearConfiguration();
-        _logger.Success($"{Constants.UI.CheckMark} {Constants.Messages.ConfigurationReset}");
-        _logger.Warning($"{Constants.UI.WarningSymbol} {Constants.Messages.RestartTerminalWarning}");
+        // Keywords that suggest public/free usage
+        string[] publicKeywords = { "free", "public", "open" };
+
+        // Check aliases
+        if (model.Aliases != null)
+        {
+            foreach (var alias in model.Aliases)
+            {
+                if (publicKeywords.Any(keyword => alias.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+        }
+
+        // Check note/description
+        if (!string.IsNullOrWhiteSpace(model.Note))
+        {
+            if (publicKeywords.Any(keyword => model.Note.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+
+        // Check if it's a known free provider endpoint
+        if (!string.IsNullOrWhiteSpace(model.Url))
+        {
+            // Check for common free model endpoints
+            if (model.Url.Contains("openrouter", StringComparison.OrdinalIgnoreCase) &&
+                model.ModelId != null && model.ModelId.Contains(":free", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        // Check if pricing indicates it's free
+        if (model.Pricing.InputPer1M == 0 &&
+            model.Pricing.OutputPer1M == 0)
+            return true;
+
+        return false;
     }
 }

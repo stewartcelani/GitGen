@@ -3,629 +3,530 @@
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/stewartcelani/GitGen)
 ![GitHub license](https://img.shields.io/github/license/stewartcelani/GitGen)
 ![.NET](https://img.shields.io/badge/.NET-9.0-blueviolet)
-![GitHub last commit](https://img.shields.io/github/last-commit/stewartcelani/GitGen)
 
-### AI-Powered Git Commit Message Generator
+#### AI-Powered Git Commit Message Generator
 
-GitGen analyzes your Git repository changes and uses AI to generate meaningful, descriptive commit messages automatically. Simply run the tool in any Git repository with uncommitted changes, and it will create a commit message based on your diff and copy it to your clipboard.
+A multi-model AI commit message generator that seamlessly integrates with your Git workflow. Configure multiple AI providers, switch between models instantly, and generate contextual commit messages that capture the essence of your changes.
 
-## Features
+![gitgen.png](img/gitgen.png)
 
-- 🔍 Automatic Git diff analysis
-- 🤖 Supports any OpenAI-compatible API (OpenAI, Anthropic, Google, Azure, Groq, local models, and more)
-- 📋 Commit messages automatically copy to clipboard
-- 🔧 Interactive configuration wizard
-- 🎨 Custom commit styles with `-p` flag
-- 🔄 Self-healing API parameter detection
-- 🌍 Cross-platform (Windows, macOS, Linux)
-- 📦 No external runtime dependencies
-- 🐛 Debug logging and connection testing
+## Key Features
+
+- **Multi-Model Architecture** - Configure unlimited AI models from different providers
+- **Instant Model Switching** - Use aliases like `@fast`, `@smart`, `@free` to switch models on the fly
+- **Secure Configuration** - API keys encrypted using platform-specific data protection
+- **Cost Tracking** - Monitor token usage and costs per model with multi-currency support
+- **OpenAI-Compatible APIs** - Works with OpenAI, Anthropic, Azure, Google, Groq, local models, and any provider offering OpenAI-compatible endpoints
+- **Smart Parameter Detection** - Automatically adapts to provider-specific API variations
+- **Zero Dependencies** - Single executable, no runtime requirements
+- **Interactive Configuration** - Guided wizard with testing and validation
+- **Partial Alias Matching** - Type partial aliases like `@ult` to match `@ultrathink`
+- **Per-Model System Prompts** - Customize behavior for each model
 
 ## Quick Start
 
 ```bash
-# Configure your AI provider
-gitgen configure
+# Download from releases and add to PATH
+# https://github.com/stewartcelani/GitGen/releases
 
-# Generate commit message for staged changes
+# First-time setup - launches configuration wizard
+gitgen config
+
+# Generate a commit message with default model
 gitgen
 
-# Guide commit messages
-gitgen -p "Must be a haiku"
-gitgen -p "Focus just on changes to app.py and ignore other files"
+# Use a specific model via alias
+gitgen @smart
+
+# Guide the generation with custom instructions
+gitgen "focus on security changes"
+gitgen @fast "explain the refactoring"
+```
+
+### Command Reference
+
+```
+$ gitgen help
+GitGen - AI-Powered Git Commit Message Generator
+
+Usage:
+  gitgen                       Generate commit message with default model
+  gitgen [prompt]              Generate with custom prompt
+  gitgen @<model>              Generate with specific model or alias
+  gitgen [prompt] @<model>     Generate with custom prompt and model
+  gitgen @<model> [prompt]     Alternative syntax
+  gitgen [command] [options]   Run a specific command
+
+Examples:
+  gitgen
+  gitgen "must be a haiku"
+  gitgen @fast                 # Use your fast model
+  gitgen @free                 # Use free model for public repos
+  gitgen -p @fast              # Preview model selection and cost
+  gitgen "focus on security" @ultrathink
+  gitgen @sonnet "explain the refactoring"
+
+💡 Tip: Configure a free model as @free to save money on public repositories
+   where sending code to free APIs doesn't matter.
+
+Options:
+  -d, --debug            Enable debug logging
+  -p, --preview          Preview mode - show what would happen without calling LLM
+  -v, --version          Show version information
+  -?, -h, --help         Show help and usage information
+
+Commands:
+  config                 Run the interactive configuration menu
+  help                   Display help information
 ```
 
 ## Installation
 
-1. Download the appropriate release for your platform from the [Releases page](https://github.com/stewartcelani/GitGen/releases).
-2. Extract the archive.
-3. Add the executable to your PATH.
-4. Run `gitgen configure` to set up your AI provider.
+### Download Binary
 
+1. Download the appropriate release for your platform from [Releases](https://github.com/stewartcelani/GitGen/releases)
+2. Extract the archive to a directory in your PATH
+3. Run `gitgen config` to set up your first model
 
 ### Build from Source
 
-Requirements: .NET 9.0 SDK, PowerShell
+Requirements: .NET 9.0 SDK
+
 ```bash
 git clone https://github.com/stewartcelani/GitGen.git
 cd GitGen
-./publish.ps1
-# Executable will be in dist/
+./publish.ps1  # Creates platform-specific executables in dist/
 ```
 
-## Prerequisites
+## Complete User Experience Guide
 
-- A Git repository with uncommitted changes
-- An API key and endpoint for a supported AI provider (e.g., OpenAI, Anthropic, Google, Azure, OpenRouter, Groq, or a local model)
+### Main Configuration Menu
 
-## Usage
-
-### First Time Setup
-
-The first time you run `gitgen`, it will detect that it's not configured and automatically launch the configuration wizard to help you set up your AI provider.
-
-```bash
-gitgen configure
-```
-
-### Generate Commit Messages
-
-In any Git repository with uncommitted changes, simply run:
-
-```bash
-gitgen
-```
-
-### Options & Commands
+Running `gitgen config` opens the main configuration interface:
 
 ```
-Description:
-  GitGen - AI-Powered Git Commit Message Generator
+╔════════════════════════════════════════╗
+║         GitGen Configuration           ║
+╚════════════════════════════════════════╝
 
-Usage:
-  gitgen [command] [options]
+1. Add new model
+2. Manage models (3 configured)
+3. Test models
+4. App settings
+5. Reset all configuration
+0. Exit
 
-Options:
-  -p, --prompt <p>  Custom prompt to focus guide/focus LLM when generating commit message.
-  -d, --debug       Enable debug logging.
-  -v                Show version information
-  --version         Show version information
-  -?, -h, --help    Show help and usage information
-
-Commands:
-  configure           Run the interactive configuration wizard.
-  test                Send 'Testing.' to the LLM and print the response.
-  info                Display current configuration information.
-  model <model-name>  Change the AI model for the current provider configuration.
-  reset               Reset all GitGen environment variables and configuration.
-  settings            Quick settings management
-  prompt <prompt-text>  Generate commit message with custom prompt instruction.
-  health              Display configuration info and test LLM connection.
-  help                Display help information.
+Select option: _
 ```
 
-### Changing Models
+### Adding a New Model - Complete Wizard Flow
 
-You can quickly change the AI model for your current provider without reconfiguring the entire setup:
+The configuration wizard guides you through 10 comprehensive steps:
 
-```bash
-gitgen model gpt-4o-mini
+#### Step 1: Model Name
+```
+🎉 Welcome to the GitGen Multi-Model Configuration Wizard
+This will guide you through setting up a new AI model configuration.
+
+Step 1: Choose a name for this model configuration.
+This is a friendly name to identify this configuration, NOT the model ID the provider uses.
+Examples: 'gpt-4-work', 'sonnet', 'kimik2', 'llama-local'
+Enter model name: claude-work
 ```
 
-#### Example: Switching from one model to another
+#### Step 2: Aliases Configuration
+```
+Step 2: Configure aliases for quick access (optional).
+Aliases allow you to quickly reference models with memorable shortcuts.
 
-```powershell
-PS C:\> gitgen info
-📋 Current GitGen Configuration:
+Examples:
+  @ultrathink - For complex reasoning tasks
+  @sonnet    - For general coding tasks
+  @free      - For public repos where privacy isn't an issue
 
-✅ Configuration Status: Valid
+💡 Tip: Configure a free model as @free to save money on public repositories
+⚠️  Important: Avoid setting a free model as your default
 
-🔧 Configuration Values:
-   Provider Type:     openai
-   Base URL:          https://openrouter.ai/api/v1/chat/completions
-   Model:             qwen/qwen3-coder:free
-   API Key:           sk-or-v1...*****************************************************************
-   Requires Auth:     True
-   Legacy Max Tokens: False
-   Temperature:       0.2
-
-🌍 Environment Variables:
-   GITGEN_PROVIDERTYPE: openai
-   GITGEN_BASEURL: https://openrouter.ai/api/v1/chat/completions
-   GITGEN_MODEL: qwen/qwen3-coder:free
-   GITGEN_APIKEY: sk-or-v1...*****************************************************************
-   GITGEN_REQUIRESAUTH: True
-   GITGEN_OPENAI_USE_LEGACY_MAX_TOKENS: False
-   GITGEN_TEMPERATURE: 0.2
-
-PS C:\> gitgen model qwen/qwq-32b
-🔄 Changing model from 'qwen/qwen3-coder:free' to 'qwen/qwq-32b'...
-ℹ️ Keeping provider: openai, Base URL: https://openrouter.ai/api/v1/chat/completions
-
-🧪 Testing new model configuration and detecting optimal parameters...
-✅ Parameter detection complete.
-ℹ️ Token parameter: Modern (max_completion_tokens)
-ℹ️ Temperature: 0.2
-✅ Model test successful!
-ℹ️ Detected API parameter style: Modern (max_completion_tokens)
-ℹ️ Model temperature: 0.2
-
-💾 Saving model configuration changes...
-✅ Model configuration updated successfully!
-🎯 Now using model: qwen/qwq-32b
-⚠️ You may need to restart your terminal for the changes to take effect.
+Enter aliases (comma-separated) [@claudework]: @claude, @work, @smart
+✅ Configured aliases: @claude, @work, @smart
 ```
 
-### Display Configuration Information
-
-You can check your current configuration by running `gitgen info`. This command displays the loaded settings, including the provider, model, endpoint, and the environment variables being used.
-
-#### Usage Example
-
-```powershell
-PS C:\path\to\your\project> gitgen info
-📋 Current GitGen Configuration:
-
-✅ Configuration Status: Valid
-
-🔧 Configuration Values:
-   Provider Type:     openai
-   Base URL:          https://openrouter.ai/api/v1/chat/completions
-   Model:             moonshotai/kimi-k2
-   API Key:           sk-or-v1...*****************************************************************
-   Requires Auth:     True
-   Legacy Max Tokens: False
-   Temperature:       0.2
-
-🌍 Environment Variables:
-   GITGEN_PROVIDERTYPE: openai
-   GITGEN_BASEURL: https://openrouter.ai/api/v1/chat/completions
-   GITGEN_MODEL: moonshotai/kimi-k2
-   GITGEN_APIKEY: sk-or-v1...*****************************************************************
-   GITGEN_REQUIRESAUTH: True
-   GITGEN_OPENAI_USE_LEGACY_MAX_TOKENS: False
-   GITGEN_TEMPERATURE: 0.2
+#### Step 3: Description
+```
+Step 3: Add a description for this model (optional).
+This helps you remember what this model is best used for.
+Enter description [none]: Company API key - high capability model for complex tasks
 ```
 
-### Health Check
+#### Step 4-5: Provider Configuration
+```
+Step 4: Select your provider's API compatibility type.
+  1. OpenAI Compatible (e.g., OpenAI, Azure, Groq, Ollama)
+Enter your choice: [1] 1
 
-The `gitgen health` command combines the configuration display of `gitgen info` with a live connection test to your AI provider. This is useful for ensuring your entire setup is working correctly.
+Step 5: Select your specific provider preset.
+  1. OpenAI (Official Platform)
+  2. Custom Provider (API Key required, e.g., Azure, Anthropic, Google, OpenRouter, Groq)
+  3. Custom Provider (No API Key required, e.g., Ollama, LM Studio)
+Enter your choice: [1] 2
+Enter the provider's chat completions URL: https://api.anthropic.com/v1/chat/completions
+Provider name [anthropic.com]: Anthropic
+Enter the model ID used by the provider's API: claude-sonnet-4-20250514
+Enter the provider's API Key: **************************************************
+```
 
-#### Usage Example
+#### Step 6-7: Configuration & Testing
+```
+Step 6: Configure maximum output tokens.
+ℹ️ Suggested: 2000 tokens (Standard model - lower limit sufficient)
+Enter max output tokens: [2000] 3000
 
-```powershell
-PS C:\path\to\your\project> gitgen health
-📋 Current GitGen Configuration:
-
-✅ Configuration Status: Valid
-
-🔧 Configuration Values:
-   Provider Type:     openai
-   Base URL:          https://openrouter.ai/api/v1/chat/completions
-   Model:             moonshotai/kimi-k2
-   API Key:           sk-or-v1...*****************************************************************
-   Requires Auth:     True
-   Legacy Max Tokens: False
-   Temperature:       0.2
-
-🌍 Environment Variables:
-   GITGEN_PROVIDERTYPE: openai
-   GITGEN_BASEURL: https://openrouter.ai/api/v1/chat/completions
-   GITGEN_MODEL: moonshotai/kimi-k2
-   GITGEN_APIKEY: sk-or-v1...*****************************************************************
-   GITGEN_REQUIRESAUTH: True
-   GITGEN_OPENAI_USE_LEGACY_MAX_TOKENS: False
-   GITGEN_TEMPERATURE: 0.2
-
-
-═════════════════════════════════════════════════════════════
-
+Step 7: Test the configuration.
+Testing your configuration and detecting optimal API parameters...
 🧪 Testing LLM connection...
-🔗 Using OpenAI provider via https://openrouter.ai/api/v1/chat/completions (moonshotai/kimi-k2)
+🔗 Using Anthropic provider via https://api.anthropic.com/v1/chat/completions
 
 ✅ LLM Response:
-"Test received—I'm here and ready. What's on your mind?"
+"Hello! I'm working great. Ready to help you generate meaningful commit messages!"
 
-Generated with 9 input tokens, 14 output tokens (23 total) • 54 characters
+Generated with 24 input tokens, 18 output tokens (42 total) • 73 characters
+🎉 Configuration test successful!
+```
 
-🎉 Test completed successfully!
+#### Step 8-10: Optional Configuration
+```
+Step 8: Configure pricing information (optional).
+Select currency:
+  1. USD ($)
+  2. EUR (€)
+  3. GBP (£)
+  4. AUD (A$)
+  5. Other
+Enter your choice: [1] 1
+Input cost per million tokens [0]: 3
+Output cost per million tokens [0]: 15
+
+Step 9: Configure custom system prompt (optional).
+Example: 'Always use conventional commit format'
+Enter custom system prompt: Focus on why changes were made, not just what changed
+
+Step 10: Review configuration summary.
+📋 Model Configuration Summary:
+   Name: claude-work
+   Aliases: @claude, @work, @smart
+   Description: Company API key - high capability model for complex tasks
+   Type: openai-compatible
+   Provider: Anthropic
+   URL: https://api.anthropic.com/v1/chat/completions
+   Model ID: claude-sonnet-4-20250514
+   Max Output Tokens: 3000
+   Pricing: Input: $3.00/M tokens, Output: $15.00/M tokens
+   System Prompt: Focus on why changes were made, not just what changed
+
+Save this model configuration? [y]: y
+✅ Model 'claude-work' saved successfully!
+```
+
+### Model Management Interface
+
+The model management submenu provides comprehensive model control:
+
+```
+═══ Model Management ═══
+
+1. List models
+2. Set default model
+3. Edit model (aliases, tokens, etc.)
+4. Delete model
+0. Back to main menu
+```
+
+#### Listing Models
+```
+═══ Configured Models ═══
+
+  claude-work ⭐ (default)
+    Type: openai-compatible | Provider: Anthropic | Model: claude-sonnet-4-20250514
+    URL: https://api.anthropic.com/v1/chat/completions
+    Temperature: 0.3 | Max Output Tokens: 3,000
+    Note: Company API key - high capability model for complex tasks
+    Aliases: @claude, @work, @smart
+    Pricing: Input: $3.00/M tokens, Output: $15.00/M tokens
+    Last used: 2025-07-28 10:45 AM
+
+  groq-fast
+    Type: openai-compatible | Provider: Groq | Model: llama-3.1-70b-versatile
+    URL: https://api.groq.com/openai/v1/chat/completions
+    Temperature: 0.3 | Max Output Tokens: 2,000
+    Note: Ultra-fast inference for quick commits
+    Aliases: @fast, @quick, @groq
+    Pricing: Input: $0.59/M tokens, Output: $0.79/M tokens
+    Last used: 2025-07-28 09:30 AM
+```
+
+### Generation Output Examples
+
+When generating commit messages, GitGen provides rich feedback:
+
+```bash
+$ gitgen
+Found 5 changed files
+🔗 Using claude-work (claude-sonnet-4-20250514 via Anthropic)
+✅ Generated Commit Message:
+"Refactor authentication middleware to support JWT refresh tokens, add concurrent device handling, and improve error responses with detailed status codes for better debugging"
+
+Generated with 3,847 input tokens, 38 output tokens (3,885 total) • 178 characters
+Estimated cost: $0.07 USD
+
+📋 Commit message copied to clipboard.
+```
+
+With cost preview for large diffs:
+```bash
+$ gitgen @ultrathink
+Found 47 changed files
+⚠️  Large diff detected: ~18,000 tokens
+
+💰 Estimated cost:
+   • Input: ~$0.18
+   • Output: ~$0.02
+   • Total: ~$0.20
+
+Continue? (y/N): y
 ```
 
 ## Provider Configuration Examples
 
-The interactive `gitgen configure` command provides three main presets for setting up your AI provider. Below are detailed examples for each one.
-
-### 1. OpenAI (Official Platform)
-
-Use this option for the official OpenAI API.
-
-#### Configuration
-
-You will be prompted for your API key and to select a model.
-
-```powershell
-PS C:\> gitgen configure
-...
-Step 1: Select your provider's API compatibility type.
-1. OpenAI Compatible (e.g., OpenAI, Azure, Groq, Ollama)
-   Enter your choice: [1]
-
-Step 2: Select your specific provider preset.
-1. OpenAI (Official Platform)
-2. Custom Provider (API Key required, e.g., Azure, Anthropic, Groq)
-3. Custom Provider (No API Key required, e.g., Ollama, LM Studio)
-   Enter your choice: [1]
-   Enter your model name: [o4-mini] gpt-4.1-nano
-   Enter your OpenAI API Key: ********************************************************
-...
-✅ Configuration saved successfully!
+### OpenAI Configuration
+```
+Step 5: Select your specific provider preset.
+Enter your choice: [1] 1
+Enter the model ID: [gpt-4o-mini] gpt-4-turbo
+Enter your OpenAI API Key: sk-**************************************************
 ```
 
-#### Usage Example
-
-```powershell
-PS C:\path\to\your\project> gitgen
-Found 3 changed files
-⏳ Generating commit message...
-
-Using OpenAI provider (https://api.openai.com/v1/chat/completions, gpt-4.1-nano) to generate commit message
-✅ Generated Commit Message:
-"Refactor user authentication to use a more secure JWT-based approach, replacing the previous session cookie implementation. Added middleware for token validation and updated login/logout endpoints accordingly."
-
-Generated with 2,451 input tokens, 58 output tokens (2,509 total) • 241 characters
-
-📋 Commit message copied to clipboard.
+### Claude (Anthropic) Configuration
+```
+Step 5: Select your specific provider preset.
+Enter your choice: [1] 2
+Enter the provider's chat completions URL: https://api.anthropic.com/v1/chat/completions
+Enter the model ID: claude-sonnet-4-20250514
+Enter the provider's API Key: sk-ant-**************************************************
 ```
 
-### 2. Custom Provider (API Key Required) - Examples: Azure, Anthropic, Google, Groq, OpenRouter
-
-This preset is for any third-party service that offers an OpenAI-compatible API and requires an API key. **This includes Microsoft Azure**, Anthropic, Google, Groq, OpenRouter, Together AI, and others.
-
-#### Example: Microsoft Azure OpenAI
-
-##### Configuration
-
-You will need your Azure endpoint URL, deployment name (which acts as the model name), and Azure API key. Select option `2` for a custom provider with an API key.
-
-```powershell
-PS C:\> gitgen configure
-...
-Step 2: Select your specific provider preset.
-...
-   Enter your choice: [1] 2
-   Enter the provider's chat completions URL (e.g., your Azure endpoint): https://intrasight.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-01-01-preview
-   Enter the model name (e.g., your Azure deployment name): gpt-4.1-nano
-   Enter the provider's API Key: ********************************************************
-...
-✅ Configuration saved successfully!
+### Gemini (Google) Configuration
+```
+Step 5: Select your specific provider preset.
+Enter your choice: [1] 2
+Enter the provider's chat completions URL: https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+Enter the model ID: gemini-2.5-flash
+Enter the provider's API Key: **************************************************
 ```
 
-##### Usage Example (Azure with gpt-4.1-nano)
-
-```powershell
-PS C:\path\to\your\project> gitgen
-Found 19 changed files
-⏳ Generating commit message...
-
-Using OpenAI provider (https://intrasight.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-01-01-preview, gpt-4.1-nano) to generate commit message
-✅ Generated Commit Message:
-"Enhanced environment variable management with IEnvironmentPersistenceService, centralizing config saving, updating, and clearing; added validation for all inputs; refactored shell profile handling for cross-platform atomic updates; improved error handling; introduced MessageCleaningService for response cleanup; expanded ValidationService with comprehensive rules for models, URLs, API keys, tokens, and temperatures; added Constants.cs for centralized magic values; improved CLI commands for quick settings and configuration management; refactored Program.cs for better flow and user prompts; all to ensure security, maintainability, and usability within 300 characters."
-
-Generated with 78,296 input tokens, 115 output tokens (78,411 total) • 672 characters
-
-📋 Commit message copied to clipboard.
+### Groq (Ultra-Fast) Configuration
+```
+Step 5: Select your specific provider preset.
+Enter your choice: [1] 2
+Enter the provider's chat completions URL: https://api.groq.com/openai/v1/chat/completions
+Enter the model ID: llama-3.1-70b-versatile
+Enter the provider's API Key: gsk-**************************************************
 ```
 
-#### Example: Anthropic
+### OpenRouter Configuration (Including Free Models)
+```
+# For paid models
+Enter the provider's chat completions URL: https://openrouter.ai/api/v1/chat/completions
+Enter the model ID: anthropic/claude-sonnet-4
+Enter the provider's API Key: sk-or-v1-**************************************************
 
-##### Configuration
-
-You will need the provider's "Chat Completions" URL, the model name, and the provider's API key.
-
-```powershell
-PS C:\> gitgen configure
-ℹ️ Welcome to the GitGen configuration wizard.
-This will guide you through setting up your AI provider.
-
-...
-
-Step 1: Select your provider's API compatibility type.
-1. OpenAI Compatible (e.g., OpenAI, Azure, Groq, Ollama)
-   Enter your choice: [1] 1
-
-Step 2: Select your specific provider preset.
-1. OpenAI (Official Platform)
-2. Custom Provider (API Key required, e.g., Azure, Anthropic, Groq)
-3. Custom Provider (No API Key required, e.g., Ollama, LM Studio)
-   Enter your choice: [1] 2
-   Enter the provider's chat completions URL (e.g., your Azure endpoint): https://api.anthropic.com/v1/chat/completions
-   Enter the model name (e.g., your Azure deployment name): claude-sonnet-4-20250514
-   Enter the provider's API Key: ************************************************************************************************************
-...
-✅ Configuration saved successfully!
+# For free models (great for public repos)
+Model name: qwen-free
+Aliases: @free, @public
+Enter the model ID: qwen/qwen-32b:free
+Note: Free model - PUBLIC REPOS ONLY
 ```
 
-##### Usage Example (Anthropic with claude-sonnet-4-20250514)
-
-```powershell
-PS C:\path\to\your\project> gitgen
-Found 1 changed files
-⏳ Generating commit message...
-
-Using OpenAI provider (https://api.anthropic.com/v1/chat/completions, claude-sonnet-4-20250514) to generate commit message
-✅ Generated Commit Message:
-"Remove -Clean parameter from publish script and automatically clean up source folders after zipping. The script now removes the -Clean switch parameter, moves folder cleanup logic inside the zipping block to always execute after creating ZIP archives, updates comment to reflect automatic cleanup, and simplifies usage examples by removing the -Clean option reference."
-
-Generated with 2,086 input tokens, 67 output tokens (2,153 total) • 368 characters
-
-📋 Commit message copied to clipboard.
+### Local Models (Ollama/LM Studio)
+```
+Step 5: Select your specific provider preset.
+Enter your choice: [1] 3
+Enter your custom provider's chat completions URL: [http://localhost:11434/v1/chat/completions]
+Enter the model ID: llama3.2
 ```
 
-#### Example: Google
+## Model Configuration Best Practices
 
-##### Configuration
+### Security-First Setup
 
-You will need the provider's "Chat Completions" URL, the model name, and the provider's API key. Google's Generative AI offers an OpenAI-compatible endpoint.
+Always configure models in order of security importance:
 
-```powershell
-PS C:\> gitgen configure
-ℹ️ Welcome to the GitGen configuration wizard.
-This will guide you through setting up your AI provider.
+```bash
+# 1. First: Your most secure model (becomes default)
+Model name: gpt-4-work
+Aliases: @work, @secure
+Note: Company API - never use for public code
 
-...
+# 2. Second: General purpose model
+Model name: claude-personal
+Aliases: @claude, @smart
+Note: Personal projects and complex tasks
 
-Step 1: Select your provider's API compatibility type.
-1. OpenAI Compatible (e.g., OpenAI, Azure, Groq, Ollama)
-   Enter your choice: [1] 1
-
-Step 2: Select your specific provider preset.
-1. OpenAI (Official Platform)
-2. Custom Provider (API Key required, e.g., Azure, Anthropic, Groq)
-3. Custom Provider (No API Key required, e.g., Ollama, LM Studio)
-   Enter your choice: [1] 2
-   Enter the provider's chat completions URL (e.g., your Azure endpoint): https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
-   Enter the model name (e.g., your Azure deployment name): gemini-2.5-flash
-   Enter the provider's API Key: ***************************************
-...
-✅ Configuration saved successfully!
+# 3. Last: Free/public models
+Model name: qwen-free
+Aliases: @free, @public
+Note: Free tier - PUBLIC REPOSITORIES ONLY
 ```
 
-##### Usage Example (Google with gemini-2.5-flash)
+### Alias Strategy
 
-```powershell
-PS C:\path\to\your\project> gitgen
-Found 18 changed files
-⏳ Generating commit message...
+Create meaningful aliases that indicate usage:
+- `@work`, `@company` - Corporate/secure models
+- `@fast`, `@quick` - Speed-optimized models
+- `@smart`, `@think` - High-capability models
+- `@free`, `@public` - Cost-free models
+- `@local`, `@private` - Self-hosted models
 
-Using OpenAI provider (https://generativelanguage.googleapis.com/v1beta/openai/chat/completions, gemini-2.5-flash) to generate commit message
-✅ Generated Commit Message:
-"Refactor TTS app to batch processing, improving text chunking and adding content fetching. Replaced old FastAPI `app.py` with `src/app.py` for file-based processing. Tokenization logic refined (hardcoded `MAX_TOKENS=1900`). Added web scrapers, tokenizer & test tools. Reqs updated, dirs restructured."
+## Advanced Usage
 
-Generated with 19,430 input tokens, 75 output tokens (21,788 total) • 300 characters
+### Model Selection Patterns
+```bash
+# Quick model switching
+gitgen @fast              # Speed over quality
+gitgen @smart             # Complex changes
+gitgen @free              # Public repositories
 
-📋 Commit message copied to clipboard.
+# Custom instructions with models
+gitgen "explain architecture changes" @smart
+gitgen @quick "just the facts"
+
+# Preview mode - see model selection and cost without calling LLM
+gitgen -p
+gitgen --preview @fast
 ```
 
-#### Example: Groq
+### PowerShell Users - Important Note
 
-##### Configuration
-
-You will need the provider's "Chat Completions" URL, the model name, and the provider's API key.
+PowerShell treats `@` as a special character for splatting. You must escape or quote the `@` symbol:
 
 ```powershell
-PS C:\> gitgen configure
-...
-Step 2: Select your specific provider preset.
-...
-   Enter your choice: [1] 2
-   Enter the provider's chat completions URL (e.g., your Azure endpoint): https://api.groq.com/openai/v1/chat/completions
-   Enter the model name (e.g., your Azure deployment name): deepseek-r1-distill-llama-70b
-   Enter the provider's API Key: ********************************************************
-...
-✅ Configuration saved successfully!
+# PowerShell - These will work:
+gitgen "@free"              # Use quotes
+gitgen '@smart'             # Single quotes also work
+gitgen `@fast               # Or use backtick to escape
+
+# PowerShell - This will NOT work:
+gitgen @free                # @ gets removed by PowerShell!
 ```
 
-##### Usage Example (Groq with deepseek-r1-distill-llama-70b)
+**Tip:** If gitgen seems to ignore your model selection, you're probably in PowerShell and need to quote the argument.
 
-```powershell
-PS C:\path\to\your\project> gitgen
-Found 19 changed files
-⏳ Generating commit message...
+### App Settings Configuration
 
-Using OpenAI provider (https://api.groq.com/openai/v1/chat/completions, deepseek-r1-distill-llama-70b) to generate commit message
-✅ Generated Commit Message:
-"Improve code quality and maintainability by extracting duplicated environment persistence logic into a dedicated service, simplifying ConsoleLogger, removing magic values, enhancing security, adding comprehensive input validation, and improving error handling and configuration management."
+Fine-tune GitGen behavior through the settings menu:
 
-Generated with 76,378 input tokens, 211 output tokens (76,589 total) • 289 characters
+```
+═══ App Settings ═══
 
-📋 Commit message copied to clipboard.
+1. Show token usage: ON
+2. Copy to clipboard: ON  
+3. Enable partial alias matching: ON
+4. Minimum alias match length: 3 chars
+0. Back to main menu
 ```
 
-#### Example: OpenRouter
+- **Token Usage**: Shows input/output token counts after generation
+- **Clipboard**: Automatically copies commit messages
+- **Partial Matching**: Type `@ult` to match `@ultrathink`
+- **Match Length**: Minimum characters for partial matching
 
-##### Configuration
+## Configuration Storage
 
-```powershell
-PS C:\> gitgen configure
-...
-Step 2: Select your specific provider preset.
-...
-   Enter your choice: [1] 2
-   Enter the provider's chat completions URL (e.g., your Azure endpoint): https://openrouter.ai/api/v1/chat/completions
-   Enter the model name (e.g., your Azure deployment name): moonshotai/kimi-k2
-   Enter the provider's API Key: *************************************************************************
-...
-✅ Configuration saved successfully!
+GitGen stores all configuration securely:
+
+- **Windows**: `%APPDATA%\GitGen\models.json` (DPAPI encrypted)
+- **macOS**: `~/.config/gitgen/models.json` (Keychain encrypted)
+- **Linux**: `~/.config/gitgen/models.json` (Kernel keyring encrypted)
+
+Configuration includes:
+- Model definitions with all parameters
+- Encrypted API keys
+- Usage statistics and last-used timestamps
+- App-wide settings
+- Default model selection
+
+## Building & Contributing
+
+GitGen is built with .NET 9.0 and designed for cross-platform compatibility:
+
+```bash
+# Clone and build
+git clone https://github.com/stewartcelani/GitGen.git
+cd GitGen
+dotnet build src/GitGen/GitGen.csproj
+
+# Run tests
+./test.ps1
+
+# Publish for all platforms
+./publish.ps1
 ```
 
-##### Usage Example (OpenRouter with moonshotai/kimi-k2)
+### Running Tests
 
-```powershell
-PS C:\path\to\your\project> gitgen
-Found 18 changed files
-⏳ Generating commit message...
+GitGen includes a comprehensive test suite built with xUnit, FluentAssertions, and NSubstitute:
 
-Using OpenAI provider (https://openrouter.ai/api/v1/chat/completions, moonshotai/kimi-k2) to generate commit message
-✅ Generated Commit Message:
-"Add Claude settings and improve TTS chunking with actual tokenizer usage. Replaced MAX_TOKENS calculation with get_actual_token_count() using model.tokenizer.encode(). Enhanced split_into_safe_chunks() with better sentence splitting, clause fallback, and truncation for oversized chunks. Added debug logging throughout generation. Added get_lit_story.ps1 for story fetching and reorganized input/output directories."
+```bash
+# Run all tests
+./test.ps1
 
-Generated with 16,736 input tokens, 76 output tokens (16,812 total) • 415 characters
+# Run tests with code coverage
+./test.ps1 -Coverage
 
-📋 Commit message copied to clipboard.
+# Run specific test categories
+./test.ps1 -Filter "FullyQualifiedName~ValidationService"
+./test.ps1 -Filter "Category=Unit"
+
+# Watch mode - re-runs tests on file changes
+./test.ps1 -Watch
+
+# Alternative: Direct dotnet test commands
+dotnet test tests/GitGen.Tests/GitGen.Tests.csproj
+dotnet test --collect:"XPlat Code Coverage"
 ```
 
-### 3. Custom Provider (No API Key) - Example: LM Studio / Ollama
+#### Test Coverage
 
-This is the perfect choice for running models locally using tools like LM Studio, Ollama, Jan, etc. These tools typically expose an OpenAI-compatible server on your local machine that doesn't require an API key.
+The test suite covers:
+- **Service Layer**: Validation, message cleaning, cost calculations
+- **Providers**: OpenAI provider implementation and parameter detection
+- **Configuration**: Model configuration validation and management
+- **Helpers**: Platform detection, date/time formatting
+- **Integration**: Configuration wizard and secure storage
 
-#### Configuration
+Coverage reports are generated in the `TestResults/` directory when using the `-Coverage` flag.
 
-You'll need the local server URL and the name of the loaded model. The wizard provides a common default URL (`http://localhost:11434/v1/chat/completions`).
+#### Test Organization
 
-```powershell
-PS C:\> gitgen configure
-...
-Step 2: Select your specific provider preset.
-...
-   Enter your choice: [1] 3
-   Enter your custom provider's chat completions URL: [http://localhost:11434/v1/chat/completions] http://localhost:1234/v1/chat/completions
-   Enter the model name (e.g., llama3): qwen2.5-3b-instruct
-...
-✅ Configuration saved successfully!
+```
+tests/GitGen.Tests/
+├── Services/           # Unit tests for service classes
+├── Providers/          # Provider implementation tests
+├── Configuration/      # Configuration system tests
+├── Helpers/           # Utility class tests
+├── IntegrationTests/  # Cross-component integration tests
+└── TestBase.cs        # Shared test utilities
 ```
 
-#### Usage Example (LM Studio with qwen2.5-3b-instruct)
+### Secure Configuration
+- API keys are encrypted using platform-specific data protection (DPAPI on Windows, Keychain on macOS, Kernel keyring on Linux)
+- Never stored in plain text or environment variables
+- Automatic cleanup of sensitive data from memory
 
-```powershell
-PS C:\path\to\your\project> gitgen
-Found 5 changed files
-⏳ Generating commit message...
-
-Using OpenAI provider (http://localhost:1234/v1/chat/completions, qwen2.5-3b-instruct) to generate commit message
-✅ Generated Commit Message:
-"Added comprehensive commit message generation with OpenAI provider, simplified `Program.cs` methods, and updated configuration wizard for user-friendly model changes. Consolidated codebase improvements maintain security, extensibility, and ease of use."
-
-Generated with 6,193 input tokens, 47 output tokens (6,240 total) • 262 characters
-
-📋 Commit message copied to clipboard.
-```
 
 ## Support & Feedback
 
-- 🐛 **Bug reports & feature requests**: [Submit an issue](https://github.com/stewartcelani/GitGen/issues)
-- 💡 **Questions & discussions**: Check existing issues or start a new one
+- 🐛 [Report bugs or request features](https://github.com/stewartcelani/GitGen/issues)
 
-## Project Structure
+## License
 
-```
-src/
-└── GitGen/                 # Main application
-    ├── Configuration/      # Configuration management
-    ├── Constants.cs        # Application constants
-    ├── Exceptions/         # Custom exception types
-    ├── Helpers/            # Utility classes
-    ├── Providers/          # AI provider implementations
-    │   └── OpenAI/         # OpenAI-compatible provider
-    ├── Services/           # Core business logic
-    ├── Program.cs          # Application entry point
-    └── GitGen.csproj       # Project file
-```
-
-## Building & Publishing (For Developers)
-
-This section is for developers who want to build the project from source.
-
-### Prerequisites
-
-- .NET 9.0 Runtime or SDK
-
-### Publish Script
-
-Run the included PowerShell script from the project root. This script creates self-contained, single-file executables for all supported platforms (Windows, Linux, macOS).
-
-```powershell
-PS C:\path\to\your\project> .\publish.ps1
-```
-
-This will:
-- Clean the output directory (`dist/`)
-- Build and publish trimmed, self-contained executables for `win-x64`, `linux-x64`, `osx-x64`, and `osx-arm64`.
-- Test the native executable (on the host OS).
-- Copy the native build to the root of `dist/` for convenience.
-- Create ZIP archives for each platform's build.
-- Clean up the uncompressed build folders, leaving only the ZIP files and the native executable.
-
-### Publish Output Example
-
-Here is an example of the output from the publish script:
-```powershell
-PS C:\path\to\your\project> .\publish.ps1
-🚀 GitGen Publisher
-Publishing self-contained, trimmed, single-file executables
-
-🔍 Running pre-flight validation...
-Checking dotnet availability...
-✅ dotnet available (v9.0.302)
-Checking project file...
-✅ Project file exists
-Testing version extraction...
-✅ Version extracted: 1.0.0
-Testing project build...
-✅ Build successful
-
-🧹 Cleaning output directory...
-Removing: C:\path\to\your\project\dist
-✅ Output directory cleaned
-✅ Fresh output directory created
-
-ℹ️ Detected project version: 1.0.0
-
-📋 Publishing for all supported platforms...
-
-📦 Publishing Windows x64 (v1.0.0, win-x64)...
-✅ Success: C:\path\to\your\project\dist\GitGen-v1.0.0-win-x64\GitGen\gitgen.exe
-📏 Size: 30.9 MB
-🧪 Testing executable...
-✅ Executable test passed: GitGen v1.0.0.0
-
-📦 Publishing Linux x64 (v1.0.0, linux-x64)...
-✅ Success: C:\path\to\your\project\dist\GitGen-v1.0.0-linux-x64\GitGen\gitgen
-📏 Size: 32.7 MB
-⚠️  Cross-platform build (cannot test)
-
-📦 Publishing macOS x64 (v1.0.0, osx-x64)...
-✅ Success: C:\path\to\your\project\dist\GitGen-v1.0.0-osx-x64\GitGen\gitgen
-📏 Size: 32.0 MB
-⚠️  Cross-platform build (cannot test)
-
-📦 Publishing macOS ARM64 (v1.0.0, osx-arm64)...
-✅ Success: C:\path\to\your\project\dist\GitGen-v1.0.0-osx-arm64\GitGen\gitgen
-📏 Size: 34.1 MB
-⚠️  Cross-platform build (cannot test)
-
-🚀 Copying current platform's build to root output path for convenience...
-Copying from C:\path\to\your\project\dist\GitGen-v1.0.0-win-x64\GitGen to C:\path\to\your\project\dist
-✅ Current platform build copied successfully.
-
-📦 Zipping release artifacts...
-Creating C:\path\to\your\project\dist\GitGen-v1.0.0-win-x64.zip...
-✅ Successfully created zip file.
-Creating C:\path\to\your\project\dist\GitGen-v1.0.0-linux-x64.zip...
-✅ Successfully created zip file.
-Creating C:\path\to\your\project\dist\GitGen-v1.0.0-osx-x64.zip...
-✅ Successfully created zip file.
-Creating C:\path\to\your\project\dist\GitGen-v1.0.0-osx-arm64.zip...
-✅ Successfully created zip file.
-
-🧹 Cleaning up source folders...
-Removing C:\path\to\your\project\dist\GitGen-v1.0.0-win-x64...
-Removing C:\path\to\your\project\dist\GitGen-v1.0.0-linux-x64...
-Removing C:\path\to\your\project\dist\GitGen-v1.0.0-osx-x64...
-Removing C:\path\to\your\project\dist\GitGen-v1.0.0-osx-arm64...
-
-📊 Publish Summary:
-✅ Successful: 4/4
-📂 Output location: C:\path\to\your\project\dist
-
-🎉 GitGen publishing complete!
-```
+MIT License - see [LICENSE](LICENSE) file for details.

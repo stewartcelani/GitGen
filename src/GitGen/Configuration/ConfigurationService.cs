@@ -3,148 +3,152 @@ using GitGen.Services;
 namespace GitGen.Configuration;
 
 /// <summary>
-///     Service for loading and validating GitGen configuration from environment variables.
-///     Handles parsing, validation, and error reporting for application configuration.
+///     Service for loading and validating GitGen configuration from secure storage.
 /// </summary>
-public class ConfigurationService(IConsoleLogger logger)
+public class ConfigurationService
 {
+    private readonly IConsoleLogger _logger;
+    private readonly ISecureConfigurationService? _secureConfig;
+
     /// <summary>
-    ///     Loads GitGen configuration from environment variables and validates the resulting configuration.
+    ///     Initializes a new instance of the <see cref="ConfigurationService" /> class.
     /// </summary>
-    /// <returns>A GitGenConfiguration object populated from environment variables.</returns>
-    public GitGenConfiguration LoadConfiguration()
+    /// <param name="logger">The console logger for user interaction and debugging.</param>
+    /// <param name="secureConfig">Optional secure configuration service for multi-model support.</param>
+    public ConfigurationService(IConsoleLogger logger, ISecureConfigurationService? secureConfig = null)
     {
-        logger.Debug("Loading configuration from environment variables.");
+        _logger = logger;
+        _secureConfig = secureConfig;
+    }
 
-        var config = new GitGenConfiguration
+
+    /// <summary>
+    ///     Loads the active model configuration asynchronously.
+    /// </summary>
+    /// <param name="modelName">Optional specific model name to load.</param>
+    /// <returns>The configuration for the specified or default model.</returns>
+    public virtual async Task<ModelConfiguration?> LoadConfigurationAsync(string? modelName = null)
+    {
+        _logger.Debug($"LoadConfigurationAsync called with modelName: '{modelName ?? "(null)"}'");
+
+        if (_secureConfig == null)
         {
-            ProviderType = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.ProviderType),
-            BaseUrl = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.BaseUrl),
-            Model = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.Model),
-            ApiKey = Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.ApiKey),
-            RequiresAuth = ParseBooleanWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.RequiresAuth),
-                true),
-            OpenAiUseLegacyMaxTokens = ParseBooleanWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.UseLegacyMaxTokens),
-                false),
-            Temperature = ParseTemperatureWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.Temperature)),
-            MaxOutputTokens = ParseTokenCountWithDefault(
-                Environment.GetEnvironmentVariable(Constants.EnvironmentVariables.MaxOutputTokens))
-        };
+            _logger.Error("Secure configuration service not available");
+            return null;
+        }
 
-        // Validate and report issues
-        ValidateConfiguration(config);
+        // Check if we have ANY models in secure storage
+        var hasModels = await HasModelsAsync();
+        if (!hasModels)
+        {
+            _logger.Debug("No models configured in secure storage");
+            return null;
+        }
 
-        return config;
+        _logger.Debug("Found models in secure storage");
+
+        ModelConfiguration? model;
+        bool specificModelRequested = !string.IsNullOrEmpty(modelName);
+
+        if (specificModelRequested)
+        {
+            _logger.Debug($"Loading specific model: '{modelName}'");
+            model = await _secureConfig.GetModelAsync(modelName);
+            if (model == null)
+            {
+                // IMPORTANT: When a specific model is requested but not found,
+                // we must return null. Never fall back to the default model.
+                _logger.Debug($"Model '{modelName}' not found");
+                return null;
+            }
+            _logger.Debug($"Successfully loaded model '{model.Name}' (requested as '{modelName}')");
+        }
+        else
+        {
+            _logger.Debug("No specific model requested, loading default model");
+            model = await _secureConfig.GetDefaultModelAsync();
+            if (model == null)
+            {
+                // We have models but no default - this needs healing
+                _logger.Debug("Models exist but no default model is set");
+                return null;
+            }
+            _logger.Debug($"Successfully loaded default model '{model.Name}'");
+        }
+
+        // Update last used timestamp
+        model.LastUsed = DateTime.UtcNow;
+        await _secureConfig.UpdateModelAsync(model);
+
+        // Debug log the model configuration
+        _logger.Debug("Model configuration loaded:");
+        _logger.Debug("  Model.Name: {Name}", model.Name);
+        _logger.Debug("  Model.Type: {Type}", model.Type ?? "(null)");
+        _logger.Debug("  Model.Provider: {Provider}", model.Provider ?? "(null)");
+        _logger.Debug("  Model.Url: {Url}", model.Url ?? "(null)");
+        _logger.Debug("  Model.ModelId: {ModelId}", model.ModelId ?? "(null)");
+
+        return model;
     }
 
     /// <summary>
-    ///     Validates the loaded configuration and logs specific issues found.
+    ///     Gets the active model configuration for use in providers.
     /// </summary>
-    /// <param name="config">The configuration to validate</param>
-    private void ValidateConfiguration(GitGenConfiguration config)
+    /// <returns>The active model configuration if using secure storage; otherwise, null.</returns>
+    public async Task<ModelConfiguration?> GetActiveModelAsync()
     {
-        if (config.IsValid)
-        {
-            logger.Debug("Configuration validation successful");
-            return;
-        }
+        if (_secureConfig == null)
+            return null;
 
-        logger.Warning("Configuration validation failed:");
-
-        // Validate each component and provide specific feedback
-        if (!ValidationService.Provider.IsValid(config.ProviderType))
-            logger.Warning("- {Error}", ValidationService.Provider.GetValidationError(config.ProviderType));
-
-        if (!ValidationService.Url.IsValid(config.BaseUrl))
-            logger.Warning("- {Error}", ValidationService.Url.GetValidationError(config.BaseUrl));
-
-        if (!ValidationService.Model.IsValid(config.Model))
-            logger.Warning("- {Error}", ValidationService.Model.GetValidationError(config.Model));
-
-        if (!ValidationService.ApiKey.IsValid(config.ApiKey, config.RequiresAuth))
-            logger.Warning("- {Error}",
-                ValidationService.ApiKey.GetValidationError(config.ApiKey, config.RequiresAuth));
-
-        if (!ValidationService.Temperature.IsValid(config.Temperature))
-            logger.Warning("- {Error}", ValidationService.Temperature.GetValidationError(config.Temperature));
-
-        if (!ValidationService.TokenCount.IsValid(config.MaxOutputTokens))
-            logger.Warning("- {Error}", ValidationService.TokenCount.GetValidationError(config.MaxOutputTokens));
+        return await _secureConfig.GetDefaultModelAsync();
     }
 
     /// <summary>
-    ///     Parses a boolean value with a specified default.
+    ///     Checks if any models are configured in secure storage.
     /// </summary>
-    /// <param name="value">The string value to parse</param>
-    /// <param name="defaultValue">The default value if parsing fails</param>
-    /// <returns>Parsed boolean or default value</returns>
-    private bool ParseBooleanWithDefault(string? value, bool defaultValue)
+    /// <returns>True if at least one model exists; otherwise, false.</returns>
+    public virtual async Task<bool> HasModelsAsync()
     {
-        if (string.IsNullOrEmpty(value))
-            return defaultValue;
+        if (_secureConfig == null)
+            return false;
 
-        return bool.TryParse(value, out var result) ? result : defaultValue;
+        var settings = await _secureConfig.LoadSettingsAsync();
+        return settings.Models.Count > 0;
     }
 
     /// <summary>
-    ///     Parses a temperature value with validation and default fallback.
+    ///     Checks if the default model configuration needs healing.
     /// </summary>
-    /// <param name="value">The string value to parse</param>
-    /// <returns>Valid temperature value</returns>
-    private double ParseTemperatureWithDefault(string? value)
+    /// <returns>True if healing is needed; otherwise, false.</returns>
+    public virtual async Task<bool> NeedsDefaultModelHealingAsync()
     {
-        if (string.IsNullOrEmpty(value))
-            return Constants.Configuration.DefaultTemperature;
+        if (_secureConfig == null)
+            return false;
 
-        if (!double.TryParse(value, out var temperature))
+        var settings = await _secureConfig.LoadSettingsAsync();
+
+        // No models exist, so no healing possible
+        if (settings.Models.Count == 0)
         {
-            logger.Debug("Invalid temperature value '{Value}', using default {Default}",
-                value, Constants.Configuration.DefaultTemperature);
-            return Constants.Configuration.DefaultTemperature;
+            _logger.Debug("No models exist, healing not possible");
+            return false;
         }
 
-        if (!ValidationService.Temperature.IsValid(temperature))
+        // Check if default model is missing or invalid
+        if (string.IsNullOrEmpty(settings.DefaultModelId))
         {
-            var clampedTemperature = ValidationService.Temperature.Clamp(temperature);
-            logger.Warning("Temperature value {Value} is out of range. Clamped to {ClampedValue}.",
-                temperature, clampedTemperature);
-            return clampedTemperature;
+            _logger.Debug("Default model ID is missing, healing needed");
+            return true;
         }
 
-        return temperature;
-    }
-
-    /// <summary>
-    ///     Parses a token count value with validation and default fallback.
-    /// </summary>
-    /// <param name="value">The string value to parse</param>
-    /// <returns>Valid token count value</returns>
-    private int ParseTokenCountWithDefault(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return Constants.Configuration.DefaultMaxOutputTokens;
-
-        if (!int.TryParse(value, out var tokens))
+        // Check if default model ID points to non-existent model
+        if (!settings.Models.Any(m => m.Id == settings.DefaultModelId))
         {
-            logger.Debug("Invalid token count value '{Value}', using default {Default}",
-                value, Constants.Configuration.DefaultMaxOutputTokens);
-            return Constants.Configuration.DefaultMaxOutputTokens;
+            _logger.Debug("Default model ID '{DefaultId}' points to non-existent model, healing needed", settings.DefaultModelId);
+            return true;
         }
 
-        if (!ValidationService.TokenCount.IsValid(tokens))
-        {
-            var clampedTokens = ValidationService.TokenCount.Clamp(tokens);
-            logger.Warning(Constants.ErrorMessages.TokensOutOfRange,
-                tokens,
-                Constants.Configuration.MinOutputTokens,
-                Constants.Configuration.MaxOutputTokens,
-                clampedTokens);
-            return clampedTokens;
-        }
-
-        return tokens;
+        _logger.Debug("Default model configuration is valid");
+        return false;
     }
 }

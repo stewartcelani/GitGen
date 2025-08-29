@@ -1,3 +1,4 @@
 ﻿<Solution>
   <Project Path="src\GitGen\GitGen.csproj" Type="Classic C#" />
+  <Project Path="tests\GitGen.Tests\GitGen.Tests.csproj" Type="Classic C#" />
 </Solution>

@@ -1,3 +1,6 @@
+using GitGen;
+using GitGen.Configuration;
+
 namespace GitGen.Services;
 
 /// <summary>
@@ -155,6 +158,10 @@ public static class ValidationService
             if (apiKey.Any(c => char.IsControl(c)))
                 return false;
 
+            // API keys should not contain whitespace
+            if (apiKey.Any(c => char.IsWhiteSpace(c)))
+                return false;
+
             return true;
         }
 
@@ -180,6 +187,9 @@ public static class ValidationService
 
             if (apiKey.Any(c => char.IsControl(c)))
                 return "API key cannot contain control characters";
+
+            if (apiKey.Any(c => char.IsWhiteSpace(c)))
+                return "API key cannot contain whitespace";
 
             return "API key is invalid";
         }
@@ -341,7 +351,9 @@ public static class ValidationService
 
             // Currently only OpenAI compatible providers are supported
             return providerType.Equals(Constants.Configuration.ProviderTypeOpenAI,
-                StringComparison.OrdinalIgnoreCase);
+                       StringComparison.OrdinalIgnoreCase) ||
+                   providerType.Equals(Constants.Configuration.ProviderTypeOpenAICompatible,
+                       StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -360,37 +372,143 @@ public static class ValidationService
     }
 
     /// <summary>
+    ///     Validation methods for pricing information.
+    /// </summary>
+    public static class Pricing
+    {
+        /// <summary>
+        ///     Validates if pricing information is acceptable.
+        /// </summary>
+        /// <param name="pricing">The pricing info to validate</param>
+        /// <returns>True if the pricing is valid</returns>
+        public static bool IsValid(PricingInfo? pricing)
+        {
+            if (pricing == null)
+                return false;
+
+            // Input and output costs must be non-negative
+            if (pricing.InputPer1M < 0 || pricing.OutputPer1M < 0)
+                return false;
+
+            // Currency code must be present and valid
+            if (string.IsNullOrWhiteSpace(pricing.CurrencyCode))
+                return false;
+
+            // Currency code should be 3 letters (ISO 4217)
+            if (pricing.CurrencyCode.Length != 3 || !pricing.CurrencyCode.All(char.IsLetter))
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
+        ///     Gets validation error message for invalid pricing.
+        /// </summary>
+        /// <param name="pricing">The invalid pricing info</param>
+        /// <returns>Descriptive error message</returns>
+        public static string GetValidationError(PricingInfo? pricing)
+        {
+            if (pricing == null)
+                return "Pricing information is required";
+
+            if (pricing.InputPer1M < 0)
+                return "Input cost per million tokens cannot be negative";
+
+            if (pricing.OutputPer1M < 0)
+                return "Output cost per million tokens cannot be negative";
+
+            if (string.IsNullOrWhiteSpace(pricing.CurrencyCode))
+                return "Currency code is required";
+
+            if (pricing.CurrencyCode.Length != 3 || !pricing.CurrencyCode.All(char.IsLetter))
+                return "Currency code must be a 3-letter code (e.g., USD, EUR)";
+
+            return "Pricing information is invalid";
+        }
+    }
+
+    /// <summary>
     ///     General validation methods for common patterns.
     /// </summary>
     public static class General
     {
-        /// <summary>
-        ///     Validates if a string contains only safe characters for shell operations.
-        /// </summary>
-        /// <param name="value">The string to validate</param>
-        /// <returns>True if the string is shell-safe</returns>
-        public static bool IsShellSafe(string? value)
-        {
-            if (string.IsNullOrEmpty(value))
-                return true;
+        // Methods removed as they were only used for environment variable validation
+    }
 
-            // Characters that could be dangerous in shell contexts
-            var dangerousChars = new[] { '`', '$', '\\', ';', '|', '&', '<', '>', '\n', '\r' };
-            return !value.Any(c => dangerousChars.Contains(c));
+    /// <summary>
+    ///     Provides domain extraction utilities for URL processing.
+    /// </summary>
+    public static class DomainExtractor
+    {
+        /// <summary>
+        ///     Extracts the domain from a URL, removing www. prefix if present.
+        /// </summary>
+        /// <param name="url">The URL to extract domain from.</param>
+        /// <returns>The extracted domain, or null if extraction fails.</returns>
+        public static string? ExtractDomain(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return null;
+
+            try
+            {
+                var uri = new Uri(url, UriKind.Absolute);
+                var domain = uri.Host;
+
+                // Remove www. prefix if present
+                if (domain.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+                    domain = domain.Substring(4);
+
+                return domain;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>
-        ///     Validates if a string is suitable for environment variable values.
+        ///     Gets the provider name from a URL by checking against known provider patterns.
+        ///     Returns null if no known provider pattern matches.
         /// </summary>
-        /// <param name="value">The string to validate</param>
-        /// <returns>True if suitable for environment variables</returns>
-        public static bool IsEnvironmentVariableSafe(string? value)
+        /// <param name="url">The URL to check.</param>
+        /// <returns>The provider name if matched, or null if no match found.</returns>
+        public static string? GetProviderNameFromUrl(string? url)
         {
-            if (string.IsNullOrEmpty(value))
-                return true;
+            if (string.IsNullOrWhiteSpace(url))
+                return null;
 
-            // Environment variables should not contain control characters except tab
-            return !value.Any(c => char.IsControl(c) && c != '\t');
+            var lowerUrl = url.ToLowerInvariant();
+
+            // Check each provider pattern (case-insensitive)
+            if (lowerUrl.StartsWith(Constants.Providers.XAIUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.XAI;
+
+            if (lowerUrl.StartsWith(Constants.Providers.OpenRouterUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.OpenRouter;
+
+            if (lowerUrl.StartsWith(Constants.Providers.GroqUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.Groq;
+
+            if (lowerUrl.StartsWith(Constants.Providers.OpenAIUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.OpenAI;
+
+            if (lowerUrl.StartsWith(Constants.Providers.AnthropicUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.Anthropic;
+
+            if (lowerUrl.Contains(Constants.Providers.GoogleGeminiUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.GoogleGemini;
+
+            if (lowerUrl.Contains(Constants.Providers.GoogleVertexUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.GoogleVertex;
+
+            if (lowerUrl.Contains(Constants.Providers.AzureUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.Azure;
+
+            if (lowerUrl.StartsWith(Constants.Providers.LocalUrlPattern.ToLowerInvariant()))
+                return Constants.Providers.Local;
+
+            return null;
         }
     }
 }
